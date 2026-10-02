@@ -25,6 +25,10 @@ def pole(ref, car, vdc):
     """Ideal half-bridge pole voltage: +Vdc/2 when reference > carrier, else -Vdc/2."""
     return np.where(ref > car, vdc / 2, -vdc / 2)
 
+def gates(p):
+    """Switch states (1 = on) from the pole voltage: (upper, lower). Ideal complementary pair, no dead time."""
+    up = (p > 0).astype(float)
+    return up, 1 - up
 
 #Topologies
 def half_bridge(t, ma, mf, vdc):

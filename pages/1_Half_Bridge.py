@@ -9,9 +9,12 @@ st.caption("One inverter leg, triangular carrier. Output is referred to the DC m
 p = ui.sidebar_inputs()
 t = core.time_grid()
 s = core.half_bridge(t, p["ma"], p["mf"], p["vdc"])
+up, lo = core.gates(s["v_a0"])
 
 rows = [("Reference and carrier (p.u.)", [("reference", s["ref"]), ("carrier", s["car"])]),
+        ("Gate signals", [("S_A+", up), ("S_A\u2212", lo)], "digital"),
         ("Pole voltage v_A0 [V]", [("v_A0", s["v_a0"])])]
+
 spectra = {"Pole voltage v_A0": (s["v_a0"], "V")}
 ui.add_load(p, s["v_a0"], "i_load", rows, spectra)
 

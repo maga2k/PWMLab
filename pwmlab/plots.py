@@ -4,14 +4,29 @@ from plotly.subplots import make_subplots
 
 
 def time_plot(t_ms, rows, step=4):
-    """rows = [(title, [(trace_name, y), ...]), ...]; all rows share one time axis."""
+    """rows = [(title, [(name, y), ...]) or (title, [...], "digital"), ...]; all rows share one time axis.
+
+    A "digital" row stacks its 0/1 traces vertically and labels the y axis with the signal names."""
+    digital = [len(r) > 2 and r[2] == "digital" for r in rows]
+    weights = [1 + 0.3 * len(r[1]) if d else 1 for r, d in zip(rows, digital)]
     fig = make_subplots(rows=len(rows), cols=1, shared_xaxes=True, vertical_spacing=0.07,
+                        row_heights=[w / sum(weights) for w in weights],
                         subplot_titles=[r[0] for r in rows])
-    for i, (_, traces) in enumerate(rows, 1):
-        for name, y in traces:
-            fig.add_scatter(x=t_ms[::step], y=y[::step], name=name, mode="lines", row=i, col=1)
+    for i, (row, dig) in enumerate(zip(rows, digital), 1):
+        traces = row[1]
+        if dig:
+            offs = [(len(traces) - 1 - k) * 1.5 for k in range(len(traces))]
+            for (name, y), o in zip(traces, offs):
+                fig.add_scatter(x=t_ms[::step], y=y[::step] + o, name=name, mode="lines",
+                                showlegend=False, row=i, col=1)
+            fig.update_yaxes(tickmode="array", tickvals=[o + 0.5 for o in offs],
+                             ticktext=[n for n, _ in traces], row=i, col=1)
+        else:
+            for name, y in traces:
+                fig.add_scatter(x=t_ms[::step], y=y[::step], name=name, mode="lines", row=i, col=1)
     fig.update_xaxes(title_text="Time [ms]", row=len(rows), col=1)
-    fig.update_layout(height=230 * len(rows), margin=dict(t=40, b=10, l=10, r=10), legend=dict(orientation="h"))
+    fig.update_layout(height=230 * len(rows) + 40 * sum(len(r[1]) for r, d in zip(rows, digital) if d),
+                      margin=dict(t=40, b=10, l=10, r=10), legend=dict(orientation="h"))
     return fig
 
 

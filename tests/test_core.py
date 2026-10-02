@@ -50,3 +50,8 @@ def test_load_current_limits():
     v = c.full_bridge(T, 0.8, 21, V)["v_ab"]
     assert np.allclose(c.load_current(v, 50, 10.0, 0.0), v / 10.0)  # L = 0: i = v / R
     assert np.mean(c.load_current(v, 50, 10.0, 0.02)) == pytest.approx(np.mean(v) / 10.0, abs=1e-9)
+
+def test_gates_are_complementary_and_balanced():
+    up, lo = c.gates(c.half_bridge(T, 0.8, 21, V)["v_a0"])
+    assert np.all(up + lo == 1)
+    assert up.mean() == pytest.approx(0.5, abs=1e-3)  # sine reference: average duty is 50 %

@@ -11,11 +11,13 @@ strategy = st.sidebar.radio("Strategy", ["Unipolar", "Bipolar"],
 p = ui.sidebar_inputs()
 t = core.time_grid()
 s = core.full_bridge(t, p["ma"], p["mf"], p["vdc"], strategy)
+(a_up, a_lo), (b_up, b_lo) = core.gates(s["v_a0"]), core.gates(s["v_b0"])
 
 ref_traces = [("reference", s["ref"]), ("carrier", s["car"])]
 if s["ref_b"] is not None:
     ref_traces.insert(1, ("\u2212reference", s["ref_b"]))
 rows = [("Reference and carrier (p.u.)", ref_traces),
+        ("Gate signals", [("S_A+", a_up), ("S_A\u2212", a_lo), ("S_B+", b_up), ("S_B\u2212", b_lo)], "digital"),
         ("Pole voltages [V]", [("v_A0", s["v_a0"]), ("v_B0", s["v_b0"])]),
         ("Output voltage v_AB [V]", [("v_AB", s["v_ab"])])]
 spectra = {"Output voltage v_AB": (s["v_ab"], "V")}

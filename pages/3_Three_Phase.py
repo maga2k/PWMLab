@@ -11,9 +11,12 @@ mod = st.sidebar.selectbox("Modulation", core.MODULATIONS,
 p = ui.sidebar_inputs(ma_max=1.3)
 t = core.time_grid()
 s = core.three_phase(t, p["ma"], p["mf"], p["vdc"], mod)
+up, lo = core.gates(s["poles"])
+gate_traces = [(f"S_{k}{sign}", g[i]) for i, k in enumerate("ABC") for sign, g in (("+", up), ("\u2212", lo))]
 
 rows = [("References and carrier (p.u.)",
          [(f"ref {k}", s["refs"][i]) for i, k in enumerate("ABC")] + [("carrier", s["car"])]),
+        ("Gate signals", gate_traces, "digital"),
         ("Pole voltage v_A0 [V]", [("v_A0", s["poles"][0])]),
         ("Line-to-line v_AB [V]", [("v_AB", s["v_ab"])]),
         ("Phase voltage v_AN [V]", [("v_AN", s["v_an"])]),
