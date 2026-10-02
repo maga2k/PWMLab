@@ -4,6 +4,7 @@ Assumptions: ideal switches, stiff DC bus Vdc, voltages are referred to the DC m
 time is normalised to one fundamental period (0 <= t < 1), carrier spans -1..+1.
 """
 import numpy as np
+from collections import namedtuple
 
 N = 2**15  #samples per fundamental period
 
@@ -30,21 +31,71 @@ def gates(p):
     up = (p > 0).astype(float)
     return up, 1 - up
 
+Load = namedtuple("Load", "f1 R L")  # series R-L load driven at fundamental frequency f1
+
+
+# ---------------------------------------------------------------- dead time
+def dead_samples(td_us, f1, n=N):
+    """Dead time in grid samples (one sample is 1 / (f1 * n) seconds)."""
+    return int(round(td_us * 1e-6 * f1 * n))
+
+
+def dead_time_gates(cmd_up, dead):
+    """Delay every turn-on by `dead` samples; turn-off is immediate. Returns (upper, lower) gate states."""
+    late = np.roll(cmd_up, dead, axis=-1)
+    return cmd_up * late, (1 - cmd_up) * (1 - late)
+
+
+def pole_from_gates(up, lo, i_out, vdc):
+    """Pole voltage. While both switches are off the load current picks the diode:
+    i_out > 0 (current leaves the pole) flows through the lower diode, i_out < 0 through the upper one."""
+    freewheel = np.where(i_out > 0, -vdc / 2, vdc / 2)
+    return up * vdc / 2 - lo * vdc / 2 + (1 - up - lo) * freewheel
+
+
+def _legs(cmd, dead, vdc, current_of=None, iters=6):
+    """cmd: commanded upper-switch state per leg, shape (legs, N).
+    current_of(poles) -> current leaving each pole. With dead time the pole voltage depends on that
+    current and the current on the voltage, so a few fixed-point iterations settle it."""
+    up, lo = dead_time_gates(cmd, dead) if dead else (cmd, 1 - cmd)
+    P = (cmd - 0.5) * vdc  # ideal poles
+    I = current_of(P) if current_of else None
+    if dead and current_of:
+        for _ in range(iters):
+            P = pole_from_gates(up, lo, I, vdc)
+            I = current_of(P)
+    return up, lo, P, I
+
+
+def _result(extra, up, lo, P, I):
+    return {**extra, "gate_up": up, "gate_lo": lo, "poles": P, "i_legs": I,
+            "i_load": None if I is None else I[0]}
+
+
 #Topologies
-def half_bridge(t, ma, mf, vdc):
+def half_bridge(t, ma, mf, vdc, load=None, dead=0):
     ref, car = sine(t, ma), carrier(t, mf)
-    return {"ref": ref, "car": car, "v_a0": pole(ref, car, vdc)}
+    cur = (lambda P: np.array([load_current(P[0], *load)])) if load else None
+    up, lo, P, I = _legs((ref > car).astype(float)[None], dead, vdc, cur)
+    return _result({"ref": ref, "car": car, "v_a0": P[0]}, up, lo, P, I)
 
 
-def full_bridge(t, ma, mf, vdc, strategy="Unipolar"):
+def full_bridge(t, ma, mf, vdc, strategy="Unipolar", load=None, dead=0):
     ref, car = sine(t, ma), carrier(t, mf)
-    va = pole(ref, car, vdc)
-    if strategy == "Bipolar":  #leg B is the complement of leg A
-        ref_b, vb = None, -va
-    else:  #unipolar: leg B uses the inverted reference, same carrier
+    cmd_a = (ref > car).astype(float)
+    if strategy == "Bipolar":  # leg B is the complement of leg A
+        ref_b, cmd_b = None, 1 - cmd_a
+    else:  # unipolar: leg B uses the inverted reference, same carrier
         ref_b = -ref
-        vb = pole(ref_b, car, vdc)
-    return {"ref": ref, "ref_b": ref_b, "car": car, "v_a0": va, "v_b0": vb, "v_ab": va - vb}
+        cmd_b = (ref_b > car).astype(float)
+
+    def cur(P):
+        i = load_current(P[0] - P[1], *load)
+        return np.array([i, -i])
+
+    up, lo, P, I = _legs(np.array([cmd_a, cmd_b]), dead, vdc, cur if load else None)
+    return _result({"ref": ref, "ref_b": ref_b, "car": car, "v_a0": P[0], "v_b0": P[1], "v_ab": P[0] - P[1]},
+                   up, lo, P, I)
 
 
 MODULATIONS = ["SPWM", "Third-harmonic injection", "SVPWM", "DPWM-MAX", "DPWM-MIN"]
@@ -65,12 +116,16 @@ def three_phase_refs(t, ma, mod):
     raise ValueError(mod)
 
 
-def three_phase(t, ma, mf, vdc, mod="SPWM"):
+def three_phase(t, ma, mf, vdc, mod="SPWM", load=None, dead=0):
     refs, car = three_phase_refs(t, ma, mod), carrier(t, mf)
-    p = pole(refs, car, vdc)
-    vcm = p.mean(0)  #common-mode voltage of a balanced star load
-    return {"refs": refs, "car": car, "poles": p, "v_ab": p[0] - p[1], "v_an": p[0] - vcm, "v_cm": vcm}
 
+    def cur(P):  # isolated neutral: each phase sees its pole minus the common-mode voltage
+        return np.array([load_current(v, *load) for v in P - P.mean(0)])
+
+    up, lo, P, I = _legs((refs > car).astype(float), dead, vdc, cur if load else None)
+    vcm = P.mean(0)  # common-mode voltage of a balanced star load
+    return _result({"refs": refs, "car": car, "v_ab": P[0] - P[1], "v_an": P[0] - vcm, "v_cm": vcm},
+                   up, lo, P, I)
 
 #Analysis
 def spectrum(x):
@@ -95,3 +150,31 @@ def load_current(v, f1, R, L):
     V = np.fft.rfft(v)
     h = np.arange(len(V))
     return np.fft.irfft(V / (R + 1j * 2 * np.pi * f1 * h * L), n=len(v))
+
+
+#Switch losses
+DEVICE = dict(vce0=1.0, rce=0.02, vf0=1.0, rd=0.015, eon=3e-3, eoff=2.5e-3, err=1.5e-3, vref=600.0, iref=50.0)
+
+
+def leg_losses(pole_v, i_out, f1, vdc, dev=DEVICE):
+    """Average losses [W] of one leg: {device: (conduction, switching)}.
+
+    Transistor (V0 + r*i) and diode (V0 + r*i) conduction; switching energies scale linearly with
+    current and DC voltage. i_out is the current leaving the pole. Conduction is decided by the pole
+    voltage and the current sign, so dead-time freewheeling is handled automatically."""
+    high, pos, ai = pole_v > 0, i_out > 0, np.abs(i_out)
+    pT, pD = dev["vce0"] * ai + dev["rce"] * ai**2, dev["vf0"] * ai + dev["rd"] * ai**2
+    cond = {"T_up": np.mean(np.where(high & pos, pT, 0)), "D_up": np.mean(np.where(high & ~pos, pD, 0)),
+            "T_lo": np.mean(np.where(~high & ~pos, pT, 0)), "D_lo": np.mean(np.where(~high & pos, pD, 0))}
+    nxt = np.roll(high, -1)
+    rise, fall = ~high & nxt, high & ~nxt  # pole transitions
+    k = f1 * ai * vdc / (dev["vref"] * dev["iref"])  # energy scaling, per event, times f1
+
+    def sw(*terms):
+        return float(sum(np.sum(np.where(m, e * k, 0)) for m, e in terms))
+
+    switching = {"T_up": sw((rise & pos, dev["eon"]), (fall & pos, dev["eoff"])),
+                 "D_up": sw((fall & ~pos, dev["err"])),
+                 "T_lo": sw((fall & ~pos, dev["eon"]), (rise & ~pos, dev["eoff"])),
+                 "D_lo": sw((rise & pos, dev["err"]))}
+    return {d: (float(cond[d]), switching[d]) for d in cond}

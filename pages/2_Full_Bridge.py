@@ -10,22 +10,24 @@ strategy = st.sidebar.radio("Strategy", ["Unipolar", "Bipolar"],
                             help="Bipolar: leg B is the complement of leg A. Unipolar: leg B uses the inverted reference.")
 p = ui.sidebar_inputs()
 t = core.time_grid()
-s = core.full_bridge(t, p["ma"], p["mf"], p["vdc"], strategy)
-(a_up, a_lo), (b_up, b_lo) = core.gates(s["v_a0"]), core.gates(s["v_b0"])
+s = core.full_bridge(t, p["ma"], p["mf"], p["vdc"], strategy, p["load"], p["dead"])
 
 ref_traces = [("reference", s["ref"]), ("carrier", s["car"])]
 if s["ref_b"] is not None:
     ref_traces.insert(1, ("\u2212reference", s["ref_b"]))
+gate_traces = [(f"S_{leg}{sign}", g[k]) for k, leg in enumerate("AB")
+               for sign, g in (("+", s["gate_up"]), ("\u2212", s["gate_lo"]))]
 rows = [("Reference and carrier (p.u.)", ref_traces),
-        ("Gate signals", [("S_A+", a_up), ("S_A\u2212", a_lo), ("S_B+", b_up), ("S_B\u2212", b_lo)], "digital"),
+        ("Gate signals", gate_traces, "digital"),
         ("Pole voltages [V]", [("v_A0", s["v_a0"]), ("v_B0", s["v_b0"])]),
         ("Output voltage v_AB [V]", [("v_AB", s["v_ab"])])]
 spectra = {"Output voltage v_AB": (s["v_ab"], "V")}
-ui.add_load(p, s["v_ab"], "i_load", rows, spectra)
+ui.add_load(p, s["i_load"], "i_load", rows, spectra)
 
 ui.show(t, rows, spectra, p, [
     "Both strategies give a fundamental of m\u2090\u00b7V_dc in the linear range.",
     "Bipolar: strong harmonic at f_sw (about 0.82\u00b7V_dc at m\u2090 = 0.8). Unipolar: nothing at f_sw, the first group is at 2f_sw.",
     "With a load, unipolar has far less current ripple at the same switching frequency: the output effectively switches at 2f_sw with half the voltage step.",
     "Try m_f = 15 and compare both strategies on the spectrum of the load current.",
-])
+    "With dead time, the unipolar output is no longer a clean three-level waveform: look at v_AB around the current zero crossings.",
+], extras={"Losses": lambda: ui.losses_tab(p, s, n_legs=2)})

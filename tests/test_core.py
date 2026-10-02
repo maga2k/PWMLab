@@ -55,3 +55,70 @@ def test_gates_are_complementary_and_balanced():
     up, lo = c.gates(c.half_bridge(T, 0.8, 21, V)["v_a0"])
     assert np.all(up + lo == 1)
     assert up.mean() == pytest.approx(0.5, abs=1e-3)  # sine reference: average duty is 50 %
+
+
+# ---------------------------------------------------------------- dead time
+LOAD = c.Load(50, 10.0, 0.05)
+
+
+def test_dead_time_never_overlaps_and_matches_gap_fraction():
+    dead, mf = c.dead_samples(10, 50), 99
+    s = c.half_bridge(T, 0.5, mf, V, LOAD, dead)
+    up, lo = s["gate_up"][0], s["gate_lo"][0]
+    assert np.max(up * lo) == 0
+    assert 1 - (up + lo).mean() == pytest.approx(2 * dead * mf / c.N, rel=1e-6)  # two gaps per carrier period
+
+
+def test_zero_dead_time_is_the_ideal_converter():
+    ideal = c.half_bridge(T, 0.8, 21, V)
+    s = c.half_bridge(T, 0.8, 21, V, LOAD, 0)
+    assert np.array_equal(ideal["v_a0"], s["v_a0"])
+
+
+def test_dead_time_pole_voltage_is_self_consistent_with_the_current():
+    s = c.half_bridge(T, 0.9, 99, V, LOAD, c.dead_samples(10, 50))
+    again = c.pole_from_gates(s["gate_up"], s["gate_lo"], s["i_legs"], V)
+    assert np.mean(again != s["poles"]) < 1e-3
+
+
+def test_dead_time_fundamental_matches_the_phasor_estimate():
+    ma, mf, td = 0.9, 99, 10
+    dead = c.dead_samples(td, 50)
+    A = ma * V / 2
+    e = 4 / np.pi * dead / (50 * c.N) * 50 * mf * V      # fundamental of the +-Vdc*td*fsw error square wave
+    phi = np.arctan(2 * np.pi * 50 * LOAD.L / LOAD.R)    # current lags the voltage
+    v = complex(A)
+    for _ in range(200):                                  # the error follows the current, which follows v
+        v = A - e * np.exp(1j * (np.angle(v) - phi))
+    got = amp(c.half_bridge(T, ma, mf, V, LOAD, dead)["v_a0"], 1)
+    assert got < amp(c.half_bridge(T, ma, mf, V, LOAD, 0)["v_a0"], 1)
+    assert got == pytest.approx(abs(v), rel=1e-2)
+
+
+def test_three_phase_currents_sum_to_zero_with_dead_time():
+    s = c.three_phase(T, 0.8, 21, V, "SPWM", c.Load(50, 10.0, 0.02), c.dead_samples(5, 50))
+    assert np.abs(s["i_legs"].sum(0)).max() < 1e-9
+
+
+# ---------------------------------------------------------------- losses
+def test_conduction_losses_add_up_to_r_i_squared():
+    s = c.half_bridge(T, 0.8, 21, 400.0, LOAD, c.dead_samples(5, 50))
+    dev = dict(c.DEVICE, vce0=0, vf0=0, rce=0.02, rd=0.02, eon=0, eoff=0, err=0)
+    leg = c.leg_losses(s["poles"][0], s["i_legs"][0], 50, 400.0, dev)
+    assert sum(cnd for cnd, _ in leg.values()) == pytest.approx(0.02 * np.mean(s["i_legs"][0] ** 2), rel=1e-9)
+
+
+def test_switching_losses_scale_with_dc_voltage():
+    s = c.half_bridge(T, 0.8, 21, 400.0, LOAD, 0)
+    a = c.leg_losses(s["poles"][0], s["i_legs"][0], 50, 400.0)
+    b = c.leg_losses(s["poles"][0], s["i_legs"][0], 50, 800.0)
+    assert sum(w for _, w in b.values()) == pytest.approx(2 * sum(w for _, w in a.values()))
+
+
+def test_dpwm_switches_less_than_spwm():
+    load = c.Load(50, 10.0, 0.02)
+    sw = {}
+    for mod in ["SPWM", "DPWM-MAX"]:
+        s = c.three_phase(T, 0.8, 21, 400.0, mod, load)
+        sw[mod] = sum(w for _, w in c.leg_losses(s["poles"][0], s["i_legs"][0], 50, 400.0).values())
+    assert sw["DPWM-MAX"] < 0.8 * sw["SPWM"]
