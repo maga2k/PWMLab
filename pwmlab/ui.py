@@ -1,6 +1,7 @@
 """Shared Streamlit widgets and result layout."""
 import numpy as np
 import streamlit as st
+from .plots import losses_plot
 
 from . import core, plots
 
@@ -65,7 +66,10 @@ def losses_tab(p, s, n_legs=1, n_phases=1):
     m3.metric("Efficiency (switches only)", f"{100 * p_out / (p_out + p_loss):.2f} %" if p_out > 0 else "n/a")
     st.dataframe([{"Device (one leg)": d, "Conduction [W]": round(c, 3), "Switching [W]": round(w, 3),
                    "Total [W]": round(c + w, 3)} for d, (c, w) in leg.items()], hide_index=True)
-
+    st.plotly_chart(
+        losses_plot(leg),
+        use_container_width=True,
+    )
 
 def show(t, rows, spectra, p, notes, extras=None):
     """extras: {tab name: zero-argument callable that draws the tab}."""

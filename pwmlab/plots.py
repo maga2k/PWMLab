@@ -40,3 +40,43 @@ def spectrum_plot(h, amp, xmax, unit, mode):
                       xaxis_title="Harmonic order (multiples of f\u2081)",
                       yaxis_title="% of fundamental" if pct else f"Amplitude [{unit}]")
     return fig
+
+def losses_plot(leg):
+    devices = list(leg.keys())
+    conduction = [c for c, w in leg.values()]
+    switching = [w for c, w in leg.values()]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=devices,
+            y=conduction,
+            name="Conduction",
+            marker_color="#1f77b4",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=devices,
+            y=switching,
+            name="Switching",
+            marker_color="#ff7f0e",
+        )
+    )
+    fig.update_layout(
+        title="Loss breakdown",
+        xaxis_title="Device",
+        yaxis_title="Losses [W]",
+        barmode="group",
+        height=400,
+        margin=dict(l=20, r=20, t=50, b=20),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+        ),
+    )
+
+    return fig
