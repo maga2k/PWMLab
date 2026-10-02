@@ -168,3 +168,82 @@ def test_unipolar_loses_frequency_doubling_with_sawtooth():
     low = lambda kind: c.spectrum(c.full_bridge(T, 0.8, mf, V, "Unipolar", kind=kind)["v_ab"])[1][2:int(1.5 * mf)].max()
     assert low("Triangle") < 1e-2          # nothing below ~2 f_sw
     assert low("Sawtooth rising") > 0.1    # first group is back around f_sw
+
+
+# ---------------------------------------------------------------- DPWM family and six-step
+CLAMPED = ["DPWM0", "DPWM1", "DPWM2", "DPWM-MAX", "DPWM-MIN"]
+
+
+@pytest.mark.parametrize("mod", CLAMPED)
+def test_dpwm_keeps_each_phase_on_a_rail_for_about_a_third_of_the_period(mod):
+    # DPWM0/2 hold the clamp decision per carrier period, so a reference may touch the rail slightly longer
+    r = c.three_phase_refs(T, 0.8, mod, 21)
+    assert np.mean(np.abs(r) >= 1 - 1e-9, axis=1) == pytest.approx([1 / 3] * 3, abs=0.015)
+
+
+@pytest.mark.parametrize("mod", ["Third-harmonic injection", "SVPWM", "DPWM1", "DPWM-MAX", "DPWM-MIN"])
+def test_references_stay_inside_the_carrier_up_to_1155(mod):
+    assert np.abs(c.three_phase_refs(T, 1.15, mod, 21)).max() <= 1 + 1e-9
+
+
+@pytest.mark.parametrize("mod", ["Third-harmonic injection", "SVPWM"] + CLAMPED)
+@pytest.mark.parametrize("mf", [21, 45])
+def test_zero_sequence_modulations_keep_the_linear_fundamental(mod, mf):
+    for ma in (0.8, 1.15):
+        v = c.three_phase(T, ma, mf, V, mod)["v_ab"]
+        assert amp(v, 1) == pytest.approx(np.sqrt(3) / 2 * ma, rel=1e-2)
+
+
+def test_clamped_leg_skips_a_third_of_its_switchings():
+    for g in c.three_phase(T, 0.8, 21, V, "DPWM1")["gate_up"]:
+        assert abs(len(edges(g)[0]) - 14) <= 1  # 21 carrier periods, 2/3 of them active
+
+
+def test_best_clamp_window_follows_the_current_peak():
+    L = 10 * np.tan(np.pi / 6) / (2 * np.pi * 50)  # current lags the voltage by 30 degrees
+    sw = {}
+    for mod in ["DPWM0", "DPWM1", "DPWM2"]:
+        s = c.three_phase(T, 0.8, 39, 400.0, mod, c.Load(50, 10.0, L))
+        sw[mod] = sum(w for _, w in c.leg_losses(s["poles"][0], s["i_legs"][0], 50, 400.0).values())
+    assert sw["DPWM2"] < 0.9 * sw["DPWM1"] < sw["DPWM0"]
+
+
+def test_six_step_matches_textbook_values():
+    s = c.three_phase(T, 0.8, 21, 400.0, "Six-step")
+    a = c.spectrum(s["v_ab"])[1]
+    assert a[1] == pytest.approx(2 * np.sqrt(3) / np.pi * 400, rel=1e-3)
+    assert a[3] < 1e-3 * a[1]
+    assert a[5] / a[1] == pytest.approx(1 / 5, rel=1e-2)
+    assert a[7] / a[1] == pytest.approx(1 / 7, rel=1e-2)
+    assert c.distortion(*c.spectrum(s["v_an"]))[0] == pytest.approx(np.sqrt(np.pi**2 / 9 - 1), rel=1e-2)
+    assert np.allclose(np.unique(np.round(s["v_an"] / 400, 3)), [-2 / 3, -1 / 3, 1 / 3, 2 / 3], atol=1e-3)
+    d, q = c.park(*c.clarke(s["v_abc"]), T)
+    assert d.mean() == pytest.approx(2 / np.pi * 400, rel=1e-3) and abs(q.mean()) < 0.5
+
+
+# ---------------------------------------------------------------- Clarke / Park
+def test_clarke_park_of_a_balanced_set():
+    x = np.array([c.sine(T, 3.0, k * 2 * np.pi / 3) for k in range(3)])
+    al, be = c.clarke(x)
+    d, q = c.park(al, be, T)
+    assert np.allclose(np.hypot(al, be), 3.0)
+    assert np.allclose(d, 3.0) and np.allclose(q, 0, atol=1e-9)
+
+
+def test_zero_sequence_injection_is_invisible_in_alpha_beta():
+    base = c.clarke(c.three_phase_refs(T, 0.8, "SPWM"))
+    for mod in ["Third-harmonic injection", "SVPWM"] + CLAMPED:
+        assert np.allclose(c.clarke(c.three_phase_refs(T, 0.8, mod)), base, atol=1e-9)
+
+
+def test_lagging_current_has_negative_q_component():
+    s = c.three_phase(T, 0.8, 21, 400.0, "SPWM", c.Load(50, 10.0, 0.02))
+    d, q = c.park(*c.clarke(s["i_legs"]), T)
+    phi = np.arctan(2 * np.pi * 50 * 0.02 / 10)
+    assert q.mean() / d.mean() == pytest.approx(-np.tan(phi), rel=2e-2)
+
+
+def test_carrier_average_recovers_the_reference():
+    h = c.half_bridge(T, 0.8, 21, 400.0)
+    assert np.max(np.abs(c.carrier_average(h["v_a0"], 21) - h["ref"] * 200)) < 0.05 * 400
+    assert np.allclose(c.carrier_average(np.ones(c.N), 21), 1)

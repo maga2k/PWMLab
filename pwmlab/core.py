@@ -75,6 +75,11 @@ def _legs(cmd, dead, vdc, current_of=None, iters=6):
             I = current_of(P)
     return up, lo, P, I
 
+def _cmd(ref, car):
+    """Commanded upper-switch state. A reference at or beyond the carrier range stays saturated, so a
+    clamped phase (|ref| = 1) never gets a one-sample glitch where it touches the carrier peak."""
+    hi, lo = ref >= 1 - 1e-12, ref <= -1 + 1e-12
+    return np.where(hi, 1.0, np.where(lo, 0.0, (ref > car).astype(float)))
 
 def _result(extra, up, lo, P, I):
     return {**extra, "gate_up": up, "gate_lo": lo, "poles": P, "i_legs": I,
@@ -85,18 +90,18 @@ def _result(extra, up, lo, P, I):
 def half_bridge(t, ma, mf, vdc, load=None, dead=0, kind="Triangle"):
     ref, car = sine(t, ma), carrier(t, mf, kind)
     cur = (lambda P: np.array([load_current(P[0], *load)])) if load else None
-    up, lo, P, I = _legs((ref > car).astype(float)[None], dead, vdc, cur)
+    up, lo, P, I = _legs(_cmd(ref, car)[None], dead, vdc, cur)
     return _result({"ref": ref, "car": car, "v_a0": P[0]}, up, lo, P, I)
 
 
 def full_bridge(t, ma, mf, vdc, strategy="Unipolar", load=None, dead=0, kind="Triangle"):
     ref, car = sine(t, ma), carrier(t, mf, kind)
-    cmd_a = (ref > car).astype(float)
+    cmd_a = _cmd(ref, car)
     if strategy == "Bipolar":  # leg B is the complement of leg A
         ref_b, cmd_b = None, 1 - cmd_a
     else:  # unipolar: leg B uses the inverted reference, same carrier
         ref_b = -ref
-        cmd_b = (ref_b > car).astype(float)
+        cmd_b = _cmd(ref_b, car)     
 
     def cur(P):
         i = load_current(P[0] - P[1], *load)
@@ -107,33 +112,56 @@ def full_bridge(t, ma, mf, vdc, strategy="Unipolar", load=None, dead=0, kind="Tr
                    up, lo, P, I)
 
 
-MODULATIONS = ["SPWM", "Third-harmonic injection", "SVPWM", "DPWM-MAX", "DPWM-MIN"]
+MODULATIONS = ["SPWM", "Third-harmonic injection", "SVPWM", "DPWM0", "DPWM1", "DPWM2",
+               "DPWM-MAX", "DPWM-MIN", "Six-step"]
+# Centre of the 60-degree clamp window relative to the peak of the phase voltage (positive = later).
+DPWM_SHIFT = {"DPWM0": -np.pi / 6, "DPWM1": 0.0, "DPWM2": np.pi / 6}
 
 
-def three_phase_refs(t, ma, mod):
+def _dpwm(t, ma, mf, r, psi):
+    """Discontinuous PWM: the phase with the largest |reference| of the frame shifted by psi is clamped to
+    its rail (60 degrees per half cycle) and the same offset is added to all three phases.
+
+    As in a digital controller the choice of the clamped phase is made once per carrier period (at its
+    centre) and held. The offset still follows the reference, so the clamped phase stays exactly on its
+    rail. Without this the jump of the offset would fall in the middle of a carrier period and bias the
+    fundamental by several percent."""
+    ts = (np.floor(t * mf) + 0.5) / mf
+    shifted = np.array([sine(ts, ma, psi + k * 2 * np.pi / 3) for k in range(3)])
+    k = np.argmax(np.abs(shifted), axis=0)[None]
+    rail = np.sign(np.take_along_axis(shifted, k, 0))[0]
+    return r + (rail - np.take_along_axis(r, k, 0)[0])
+
+
+def three_phase_refs(t, ma, mod, mf=21):
     r = np.array([sine(t, ma, k * 2 * np.pi / 3) for k in range(3)])
     if mod == "SPWM":
         return r
     if mod.startswith("Third"):
         return r + ma * np.sin(6 * np.pi * t) / 6  # 1/6 of the 3rd harmonic
     if mod == "SVPWM":
-        return r - (r.max(0) + r.min(0)) / 2  #min-max (zero-sequence) injection
+        return r - (r.max(0) + r.min(0)) / 2  # min-max (zero-sequence) injection
+    if mod in DPWM_SHIFT:
+        return _dpwm(t, ma, mf, r, DPWM_SHIFT[mod])
     if mod == "DPWM-MAX":
-        return r + (1 - r.max(0))  #highest phase clamped to +1
+        return r + (1 - r.max(0))  # highest phase clamped to +1
     if mod == "DPWM-MIN":
-        return r - (1 + r.min(0))  #lowest phase clamped to -1
+        return r - (1 + r.min(0))  # lowest phase clamped to -1
+    if mod == "Six-step":  # 180-degree conduction: saturated references, m_a and the carrier play no role
+        return np.array([np.sign(np.sin(2 * np.pi * t - k * 2 * np.pi / 3 + 1e-9)) for k in range(3)])
     raise ValueError(mod)
 
 
 def three_phase(t, ma, mf, vdc, mod="SPWM", load=None, dead=0, kind="Triangle"):
-    refs, car = three_phase_refs(t, ma, mod), carrier(t, mf, kind)
+    refs, car = three_phase_refs(t, ma, mod, mf), carrier(t, mf, kind)
 
     def cur(P):  # isolated neutral: each phase sees its pole minus the common-mode voltage
         return np.array([load_current(v, *load) for v in P - P.mean(0)])
 
-    up, lo, P, I = _legs((refs > car).astype(float), dead, vdc, cur if load else None)
+    up, lo, P, I = _legs(_cmd(refs, car), dead, vdc, cur if load else None)
     vcm = P.mean(0)  # common-mode voltage of a balanced star load
-    return _result({"refs": refs, "car": car, "v_ab": P[0] - P[1], "v_an": P[0] - vcm, "v_cm": vcm},
+    return _result({"refs": refs, "car": car, "v_ab": P[0] - P[1], "v_an": P[0] - vcm, "v_cm": vcm,
+                    "v_abc": P - vcm},
                    up, lo, P, I)
 
 #Analysis
@@ -187,3 +215,25 @@ def leg_losses(pole_v, i_out, f1, vdc, dev=DEVICE):
                  "T_lo": sw((fall & ~pos, dev["eon"]), (rise & ~pos, dev["eoff"])),
                  "D_lo": sw((rise & pos, dev["err"]))}
     return {d: (float(cond[d]), switching[d]) for d in cond}
+
+
+#Clarke / Park
+def clarke(x):
+    """Amplitude-invariant Clarke transform of a three-phase set x (shape (3, N)): returns (alpha, beta)."""
+    a, b, c = x
+    return (2 * a - b - c) / 3, (b - c) / np.sqrt(3)
+
+
+def park(alpha, beta, t):
+    """Park transform. The d axis sits on the fundamental of phase A defined as sin(2 pi t), so a balanced
+    set A*sin(...) gives d = A and q = 0 (a lagging current gives q < 0)."""
+    th = 2 * np.pi * t - np.pi / 2
+    return alpha * np.cos(th) + beta * np.sin(th), -alpha * np.sin(th) + beta * np.cos(th)
+
+
+def carrier_average(x, mf):
+    """Circular moving average over one carrier period: the 'averaged' vector the PWM tries to synthesise."""
+    w = max(1, int(round(len(x) / mf)))
+    k = np.zeros(len(x))
+    k[:w] = 1 / w
+    return np.real(np.fft.ifft(np.fft.fft(x) * np.fft.fft(np.roll(k, -(w // 2)))))

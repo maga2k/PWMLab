@@ -80,3 +80,22 @@ def losses_plot(leg):
     )
 
     return fig
+
+
+def vector_plot(a, b, a_avg, b_avg, ref=None, vdc=None, unit="V"):
+    """Space-vector plane. With vdc, draws the hexagon of the maximum vector and the linear-range circle."""
+    fig = go.Figure()
+    if vdc:
+        k, th = np.arange(7) * np.pi / 3, np.linspace(0, 2 * np.pi, 200)
+        fig.add_scatter(x=2 * vdc / 3 * np.cos(k), y=2 * vdc / 3 * np.sin(k), mode="lines",
+                        name="hexagon", line=dict(dash="dot"))
+        fig.add_scatter(x=vdc / np.sqrt(3) * np.cos(th), y=vdc / np.sqrt(3) * np.sin(th), mode="lines",
+                        name="linear-range circle", line=dict(dash="dash"))
+    fig.add_scatter(x=a[::8], y=b[::8], mode="markers", name="instantaneous", marker=dict(size=4, opacity=0.35))
+    fig.add_scatter(x=a_avg[::8], y=b_avg[::8], mode="lines", name="carrier average")
+    if ref is not None:
+        fig.add_scatter(x=ref[0][::8], y=ref[1][::8], mode="lines", name="reference", line=dict(dash="dot"))
+    fig.update_xaxes(title_text=f"\u03b1 [{unit}]")
+    fig.update_yaxes(title_text=f"\u03b2 [{unit}]", scaleanchor="x", scaleratio=1)
+    fig.update_layout(height=480, margin=dict(t=10, b=10, l=10, r=10), legend=dict(orientation="h"))
+    return fig

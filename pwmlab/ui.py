@@ -71,6 +71,29 @@ def losses_tab(p, s, n_legs=1, n_phases=1):
         use_container_width=True,
     )
 
+def clarke_park_tab(p, s):
+    """Space vector in the alpha-beta plane and its d/q components (three-phase only)."""
+    kinds = ["Phase voltage"] + (["Load current"] if s["i_legs"] is not None else [])
+    volt = st.radio("Vector", kinds, horizontal=True) == "Phase voltage"
+    x, unit = (s["v_abc"], "V") if volt else (s["i_legs"], "A")
+    t = core.time_grid()
+    alpha, beta = core.clarke(x)
+    d, q = core.park(alpha, beta, t)
+    avg = lambda y: core.carrier_average(y, p["mf"])
+    ref = tuple(p["vdc"] / 2 * z for z in core.clarke(s["refs"])) if volt else None
+    left, right = st.columns(2)
+    left.plotly_chart(plots.vector_plot(alpha, beta, avg(alpha), avg(beta), ref, p["vdc"] if volt else None, unit))
+    rows = [(f"d axis [{unit}]", [("instantaneous", d), ("carrier average", avg(d))]),
+            (f"q axis [{unit}]", [("instantaneous", q), ("carrier average", avg(q))])]
+    right.plotly_chart(plots.time_plot(t / p["f1"] * 1000, rows))
+    m1, m2, m3 = st.columns(3)
+    m1.metric("d (mean)", f"{d.mean():.2f} {unit}")
+    m2.metric("q (mean)", f"{q.mean():.2f} {unit}")
+    m3.metric("|dq| (mean)", f"{np.hypot(d.mean(), q.mean()):.2f} {unit}")
+    st.caption("Amplitude-invariant Clarke. The d axis sits on the fundamental of phase A, so a balanced set "
+               "gives constant d and q = 0; a lagging current has q < 0.")
+    
+
 def show(t, rows, spectra, p, notes, extras=None):
     """extras: {tab name: zero-argument callable that draws the tab}."""
     extras = extras or {}
