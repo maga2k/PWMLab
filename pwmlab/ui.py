@@ -8,6 +8,8 @@ from . import core, plots
 def sidebar_inputs(mf_default=15, ma_max=1.5):
     sb = st.sidebar
     p = {
+        "carrier": sb.selectbox("Carrier", core.CARRIERS,
+                                help="Triangle: both edges move (double-edge). Sawtooth: one edge is fixed at the start of each carrier period, only the other moves (single-edge)."),
         "ma": sb.slider("Modulation index  m\u2090", 0.0, ma_max, 0.8, 0.01,
                         help="Reference amplitude / carrier amplitude. Above 1 the converter overmodulates (above 1.155 for SVPWM/THI three-phase)."),
         "mf": sb.slider("Frequency ratio  m_f = f_sw / f\u2081", 3, 99, mf_default, 2,

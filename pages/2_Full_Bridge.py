@@ -10,7 +10,7 @@ strategy = st.sidebar.radio("Strategy", ["Unipolar", "Bipolar"],
                             help="Bipolar: leg B is the complement of leg A. Unipolar: leg B uses the inverted reference.")
 p = ui.sidebar_inputs()
 t = core.time_grid()
-s = core.full_bridge(t, p["ma"], p["mf"], p["vdc"], strategy, p["load"], p["dead"])
+s = core.full_bridge(t, p["ma"], p["mf"], p["vdc"], strategy, p["load"], p["dead"], p["carrier"])
 
 ref_traces = [("reference", s["ref"]), ("carrier", s["car"])]
 if s["ref_b"] is not None:
@@ -26,7 +26,8 @@ ui.add_load(p, s["i_load"], "i_load", rows, spectra)
 
 ui.show(t, rows, spectra, p, [
     "Both strategies give a fundamental of m\u2090\u00b7V_dc in the linear range.",
-    "Bipolar: strong harmonic at f_sw (about 0.82\u00b7V_dc at m\u2090 = 0.8). Unipolar: nothing at f_sw, the first group is at 2f_sw.",
+    "Triangle carrier. Bipolar: strong harmonic at f_sw (about 0.82\u00b7V_dc at m\u2090 = 0.8). Unipolar: nothing at f_sw, the first group is at 2f_sw.",
+    "Switch to a sawtooth carrier: unipolar loses the frequency doubling. The first group comes back around f_sw and WTHD roughly doubles.",
     "With a load, unipolar has far less current ripple at the same switching frequency: the output effectively switches at 2f_sw with half the voltage step.",
     "Try m_f = 15 and compare both strategies on the spectrum of the load current.",
     "With dead time, the unipolar output is no longer a clean three-level waveform: look at v_AB around the current zero crossings.",

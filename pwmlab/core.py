@@ -13,9 +13,18 @@ def time_grid(n=N):
     return np.arange(n) / n
 
 
-def carrier(t, mf):
-    """Centre-aligned triangle between -1 and +1 (peak at t = 0)."""
-    return 4 * np.abs((t * mf) % 1 - 0.5) - 1
+CARRIERS = ["Triangle", "Sawtooth rising", "Sawtooth falling"]
+
+
+def carrier(t, mf, kind="Triangle"):
+    """Carrier between -1 and +1. Triangle: centre-aligned, peak at t = 0 (double-edge modulation).
+    Sawtooth: one edge is locked to the start of every carrier period, only the other one moves."""
+    x = (t * mf) % 1
+    if kind == "Sawtooth rising":
+        return 2 * x - 1
+    if kind == "Sawtooth falling":
+        return 1 - 2 * x
+    return 4 * np.abs(x - 0.5) - 1
 
 
 def sine(t, ma, phase=0.0):
@@ -34,7 +43,7 @@ def gates(p):
 Load = namedtuple("Load", "f1 R L")  # series R-L load driven at fundamental frequency f1
 
 
-# ---------------------------------------------------------------- dead time
+#Dead time
 def dead_samples(td_us, f1, n=N):
     """Dead time in grid samples (one sample is 1 / (f1 * n) seconds)."""
     return int(round(td_us * 1e-6 * f1 * n))
@@ -73,15 +82,15 @@ def _result(extra, up, lo, P, I):
 
 
 #Topologies
-def half_bridge(t, ma, mf, vdc, load=None, dead=0):
-    ref, car = sine(t, ma), carrier(t, mf)
+def half_bridge(t, ma, mf, vdc, load=None, dead=0, kind="Triangle"):
+    ref, car = sine(t, ma), carrier(t, mf, kind)
     cur = (lambda P: np.array([load_current(P[0], *load)])) if load else None
     up, lo, P, I = _legs((ref > car).astype(float)[None], dead, vdc, cur)
     return _result({"ref": ref, "car": car, "v_a0": P[0]}, up, lo, P, I)
 
 
-def full_bridge(t, ma, mf, vdc, strategy="Unipolar", load=None, dead=0):
-    ref, car = sine(t, ma), carrier(t, mf)
+def full_bridge(t, ma, mf, vdc, strategy="Unipolar", load=None, dead=0, kind="Triangle"):
+    ref, car = sine(t, ma), carrier(t, mf, kind)
     cmd_a = (ref > car).astype(float)
     if strategy == "Bipolar":  # leg B is the complement of leg A
         ref_b, cmd_b = None, 1 - cmd_a
@@ -116,8 +125,8 @@ def three_phase_refs(t, ma, mod):
     raise ValueError(mod)
 
 
-def three_phase(t, ma, mf, vdc, mod="SPWM", load=None, dead=0):
-    refs, car = three_phase_refs(t, ma, mod), carrier(t, mf)
+def three_phase(t, ma, mf, vdc, mod="SPWM", load=None, dead=0, kind="Triangle"):
+    refs, car = three_phase_refs(t, ma, mod), carrier(t, mf, kind)
 
     def cur(P):  # isolated neutral: each phase sees its pole minus the common-mode voltage
         return np.array([load_current(v, *load) for v in P - P.mean(0)])

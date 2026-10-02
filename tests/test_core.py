@@ -122,3 +122,49 @@ def test_dpwm_switches_less_than_spwm():
         s = c.three_phase(T, 0.8, 21, 400.0, mod, load)
         sw[mod] = sum(w for _, w in c.leg_losses(s["poles"][0], s["i_legs"][0], 50, 400.0).values())
     assert sw["DPWM-MAX"] < 0.8 * sw["SPWM"]
+
+
+    # ---------------------------------------------------------------- carriers
+def edges(g):
+    """Sample indices of rising and falling edges of a 0/1 signal (circular)."""
+    prev = np.roll(g, 1)
+    return np.flatnonzero((g == 1) & (prev == 0)), np.flatnonzero((g == 0) & (prev == 1))
+
+
+def test_carrier_shapes():
+    t = np.array([0, 0.0625, 0.125, 0.1875])  # with mf = 4: position in the carrier period is 0, 1/4, 1/2, 3/4
+    assert np.allclose(c.carrier(t, 4, "Triangle"), [1, 0, -1, 0])
+    assert np.allclose(c.carrier(t, 4, "Sawtooth rising"), [-1, -0.5, 0, 0.5])
+    assert np.allclose(c.carrier(t, 4, "Sawtooth falling"), [1, 0.5, 0, -0.5])
+
+
+@pytest.mark.parametrize("kind", ["Sawtooth rising", "Sawtooth falling"])
+def test_sawtooth_fundamental_is_unchanged(kind):
+    assert amp(c.half_bridge(T, 0.8, 21, V, kind=kind)["v_a0"], 1) == pytest.approx(0.4, rel=1e-2)
+
+
+@pytest.mark.parametrize("kind, locked", [("Sawtooth rising", 0), ("Sawtooth falling", 1)])
+def test_sawtooth_locks_one_edge_to_the_carrier_period(kind, locked):
+    mf = 21
+    g = c.half_bridge(T, 0.8, mf, V, kind=kind)["gate_up"][0]
+    expected = np.ceil(np.arange(mf) * c.N / mf)
+    fixed, moving = edges(g)[locked], edges(g)[1 - locked]
+    assert len(fixed) == len(moving) == mf
+    assert np.max(np.abs(fixed - expected)) <= 1  # rising saw: rising edge fixed; falling saw: falling edge fixed
+    assert np.max(np.abs(moving - expected)) > 100  # the other edge follows the reference
+
+
+def test_sawtooth_adds_odd_sidebands_and_carrier_second_harmonic():
+    mf = 21
+    tri = c.half_bridge(T, 0.8, mf, V)["v_a0"]
+    saw = c.half_bridge(T, 0.8, mf, V, kind="Sawtooth rising")["v_a0"]
+    for h in (mf - 1, 2 * mf):
+        assert amp(tri, h) < 1e-3
+        assert amp(saw, h) > 0.05
+
+
+def test_unipolar_loses_frequency_doubling_with_sawtooth():
+    mf = 21
+    low = lambda kind: c.spectrum(c.full_bridge(T, 0.8, mf, V, "Unipolar", kind=kind)["v_ab"])[1][2:int(1.5 * mf)].max()
+    assert low("Triangle") < 1e-2          # nothing below ~2 f_sw
+    assert low("Sawtooth rising") > 0.1    # first group is back around f_sw

@@ -10,7 +10,7 @@ mod = st.sidebar.selectbox("Modulation", core.MODULATIONS,
                            help="SPWM: pure sines. THI/SVPWM: add a zero-sequence term (extends linear range to 1.155). DPWM: one phase is clamped to a rail for 120\u00b0 (fewer switchings).")
 p = ui.sidebar_inputs(ma_max=1.3)
 t = core.time_grid()
-s = core.three_phase(t, p["ma"], p["mf"], p["vdc"], mod, p["load"], p["dead"])
+s = core.three_phase(t, p["ma"], p["mf"], p["vdc"], mod, p["load"], p["dead"], p["carrier"])
 
 gate_traces = [(f"S_{k}{sign}", g[i]) for i, k in enumerate("ABC")
                for sign, g in (("+", s["gate_up"]), ("\u2212", s["gate_lo"]))]
@@ -31,5 +31,6 @@ ui.show(t, rows, spectra, p, [
     "Triplen harmonics (3, 9, ...) are common-mode: they cancel in v_AB when m_f is a multiple of 3.",
     "The harmonic at f_sw is pure common-mode too: select 'Common-mode v_N0' and compare it with v_AB.",
     "DPWM modulations clamp a phase for 120\u00b0: watch the flat segments in the pole voltage.",
+    "Sawtooth carrier: the locked edge of all three legs falls on the same instant, line-to-line harmonics near f_sw grow and WTHD is roughly 50 % higher than with a triangle.",
     "Losses tab: DPWM switches each leg for only 2/3 of the period, so switching losses drop compared with SPWM at the same f_sw.",
 ], extras={"Losses": lambda: ui.losses_tab(p, s, n_legs=3, n_phases=3)})
