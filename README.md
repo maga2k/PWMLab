@@ -88,6 +88,36 @@ convention above is the one used here.
 - Clarke is amplitude-invariant. The Park d axis sits on the fundamental of phase A, so a balanced set
   gives constant d and q = 0, and a lagging current has q < 0.
 
+## Screenshots
+
+**Three-phase inverter.** Gate signals of the six switches, pole, line, phase and common-mode voltages and the
+load current, here with SVPWM.
+
+<img src="docs/images/three_phase_waveforms.png" width="800" alt="Three-phase inverter waveforms with SVPWM">
+
+**Clarke / Park.** Space vector of the phase voltage on the hexagon, its carrier average, and the d and q
+components.
+
+<img src="docs/images/clarke_park.png" width="800" alt="Clarke and Park transforms">
+
+**Modulation comparison.** Same m_a, f_sw, load and dead time for every modulation: losses, ripple, common-mode
+voltage and power quantities.
+
+<img src="docs/images/modulation_comparison.png" width="800" alt="Modulation comparison table">
+
+**Sweeps.** WTHD, current ripple, switching losses and efficiency against the switching frequency up to 20 kHz.
+DPWM2 recovers about 0.8 points of efficiency over SPWM at 20 kHz.
+
+<img src="docs/images/sweeps.png" width="800" alt="Sweep over the switching frequency">
+
+**Space-vector PWM, step by step.** Sector, dwell times and the decomposition of the reference vector.
+
+<img src="docs/images/svpwm.png" width="800" alt="Explicit space-vector PWM">
+
+**Half bridge with a sawtooth carrier.** One edge of the gate signal is locked to the carrier period.
+
+<img src="docs/images/half_bridge_sawtooth.png" width="800" alt="Half bridge with a sawtooth carrier">
+
 ## Run it locally
 
 ```bash
