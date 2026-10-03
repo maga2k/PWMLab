@@ -1,0 +1,56 @@
+import numpy as np
+import pytest
+
+from pwmlab import core, metrics as M
+
+LOAD = core.Load(50, 10.0, 0.02)
+
+
+def run(mod, ma=0.8, mf=15, **kw):
+    return M.three_phase_metrics(mod, ma, mf, 400.0, LOAD, **kw)
+
+
+def test_ripple_removes_dc_and_fundamental_only():
+    t = core.time_grid()
+    assert M.ripple_rms(3 + 5 * np.sin(2 * np.pi * t)) < 1e-9
+    assert M.ripple_rms(5 * np.sin(2 * np.pi * t) + 0.1 * np.sin(20 * np.pi * t)) == pytest.approx(0.1 / np.sqrt(2), rel=1e-6)
+
+
+def test_current_ripple_scales_as_one_over_fsw():
+    assert run("SPWM", mf=15)["i_ripple"] / run("SPWM", mf=45)["i_ripple"] == pytest.approx(3, rel=0.1)
+
+
+def test_switching_losses_scale_with_fsw():
+    assert run("SPWM", mf=45)["p_sw"] / run("SPWM", mf=15)["p_sw"] == pytest.approx(3, rel=0.1)
+
+
+def test_efficiency_is_consistent_with_powers():
+    m = run("SPWM")
+    assert m["eff"] == pytest.approx(100 * m["p_out"] / (m["p_out"] + m["p_loss"]))
+    assert m["p_loss"] == pytest.approx(m["p_cond"] + m["p_sw"])
+
+
+def test_six_step_common_mode_is_vdc_over_six():
+    m = run("Six-step")
+    assert m["vcm_rms"] == pytest.approx(400 / 6, rel=1e-6) and m["vcm_pk"] == pytest.approx(400 / 6, rel=1e-6)
+
+
+def test_effective_modulation_index():
+    assert run("SPWM", ma=0.7)["m_eff"] == pytest.approx(0.7, rel=1e-2)
+    assert run("SVPWM", ma=1.1)["m_eff"] == pytest.approx(1.1, rel=1e-2)
+    assert run("SPWM", ma=1.1)["m_eff"] < 1.1 * 0.99  # SPWM already saturates
+    assert run("Six-step")["m_eff"] == pytest.approx(4 / np.pi, rel=1e-3)
+
+
+def test_dpwm_saves_switching_loss_but_not_common_mode():
+    spwm, dpwm = run("SPWM", mf=39), run("DPWM1", mf=39)
+    assert dpwm["p_sw"] < 0.85 * spwm["p_sw"]
+    assert dpwm["vcm_rms"] == pytest.approx(spwm["vcm_rms"], rel=0.05)
+    assert dpwm["wthd"] > spwm["wthd"]
+
+
+def test_sweep_matches_individual_runs():
+    fixed = dict(mod="SPWM", ma=0.8, vdc=400.0, load=LOAD, dead=0, kind="Triangle", dev=core.DEVICE)
+    out = M.sweep("mf", [15, 45], **fixed)
+    assert out["p_sw"][1] == pytest.approx(run("SPWM", mf=45)["p_sw"])
+    assert out["wthd"].shape == (2,)

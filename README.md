@@ -33,6 +33,20 @@ Each page has tabs:
   linear-range circle, instantaneous vector vs carrier-averaged vector, d and q components of the
   phase voltage or of the load current.
 
+## Analysis pages
+
+- **Modulation comparison**: the three-phase inverter with every selected modulation at the same m_a,
+  f_sw, carrier, load and dead time. One table with the line-to-line fundamental, effective modulation
+  index, WTHD, current ripple, conduction and switching losses, efficiency and common-mode voltage, plus
+  a bar chart of any metric. The R-L load is always on in this page.
+- **Sweeps**: the same metrics against the switching frequency (up to m_f = 399) or against the modulation
+  index, from the linear range to six-step, for several modulations at once.
+- **Space-vector PWM**: SVPWM built explicitly. Sector, dwell times T1/T2/T0 and the switching sequence of
+  any carrier period, the reference vector on the hexagon, and a counter that checks the gates against
+  the min-max injection.
+
+The metrics live in `pwmlab/metrics.py`, so the table and the sweeps share the same code.
+
 ## Three-phase modulations
 
 | Modulation | Zero-sequence term |
@@ -106,6 +120,10 @@ The tests compare the results with closed-form or textbook values rather than wi
   switching less than SPWM, best clamp window for a lagging current
 - Clarke/Park of a balanced set, invisibility of the zero-sequence term in alpha-beta, sign of q for a
   lagging current
+- metrics: ripple scales as 1/f_sw, switching losses as f_sw, six-step common mode is V_dc/6, effective
+  modulation index up to 4/pi, DPWM saves switching loss without reducing common-mode voltage
+- explicit SVPWM: gates identical to the min-max injection, dwell times add up to 1, sectors advance 1 to 6,
+  one leg switches at a time
 
 ## Project layout
 
@@ -115,17 +133,18 @@ pages/             one file per topology (Streamlit builds the sidebar navigatio
 pwmlab/core.py     all the maths: pure NumPy, no Streamlit
 pwmlab/plots.py    Plotly figures
 pwmlab/ui.py       sidebar widgets, tabs and result layout
+pwmlab/metrics.py  scalar metrics of a simulation (WTHD, current ripple, losses common mode...)
 tests/             pytest suite
 ```
 
 ## Roadmap
 
-- Modulation comparison: same m_a, f_sw and load, one table with WTHD, RMS current ripple, switching and
-  conduction losses, efficiency and common-mode voltage for each modulation
-- Sweeps over f_sw and m_a (losses, ripple, WTHD, efficiency), and fundamental vs m_a from the linear
-  range to six-step
-- Explicit space-vector SVPWM: sector, dwell times T1/T2/T0 and switching sequence, checked against the
-  min-max injection
+## Roadmap
+
+- Generalised SVPWM with an adjustable zero-vector split: all 000, equal split and all 111 should
+  reproduce DPWM-MIN, SVPWM and DPWM-MAX
+- Overmodulation in the space-vector domain (mode I and II), compared with the carrier-based result
+- Comparison and sweeps for the single-phase topologies
 - Regular sampling (symmetric / asymmetric)
 - Thermal model: junction temperature from R_jc per device and a shared heatsink resistance
 - Datasheet-based device data: switching energy curves instead of linear scaling

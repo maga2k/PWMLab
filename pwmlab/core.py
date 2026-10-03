@@ -237,3 +237,41 @@ def carrier_average(x, mf):
     k = np.zeros(len(x))
     k[:w] = 1 / w
     return np.real(np.fft.ifft(np.fft.fft(x) * np.fft.fft(np.roll(k, -(w // 2)))))
+
+#Explicit SVPWM
+VECTOR_CODES = np.array([[1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 1, 1], [0, 0, 1], [1, 0, 1]])  # V1..V6 as (a, b, c)
+
+
+def svpwm_explicit(t, ma, mf):
+    """Space-vector PWM built from sector, dwell times and switching sequence (triangle carrier only).
+
+    Once per carrier period (at its centre) the reference vector is sampled, its sector found, and the
+    dwell times T1, T2, T0 (fractions of the carrier period) computed. The symmetric sequence
+    000 - Va - Vb - 111 - Vb - Va - 000 (zero vectors share T0 equally) gives the gate states. In odd
+    sectors (1, 3, 5) Va = Vn and Vb = Vn+1; in even sectors the two are swapped so that only one leg
+    switches at a time. Beyond the circle inscribed in the hexagon (T1 + T2 > 1) T1 and T2 are scaled
+    down, keeping the direction. Vectors are in units of V_dc: active vectors have length 2/3 and the
+    linear limit is 1/sqrt(3)."""
+    pos = np.asarray(t) * mf
+    k = np.clip(np.floor(pos).astype(int), 0, mf - 1)
+    x = pos - k  # position inside the carrier period, 0..1
+    tc = (np.arange(mf) + 0.5) / mf
+    phi = (2 * np.pi * tc - np.pi / 2) % (2 * np.pi)  # angle of the reference vector (phase A is sin)
+    n = np.floor(phi / (np.pi / 3)).astype(int) % 6  # sector 0..5
+    alpha = phi - n * np.pi / 3  # angle inside the sector
+    mag = ma / 2  # |v_ref| / V_dc
+    t1, t2 = np.sqrt(3) * mag * np.sin(np.pi / 3 - alpha), np.sqrt(3) * mag * np.sin(alpha)
+    over = np.maximum(t1 + t2, 1.0)
+    t1, t2 = t1 / over, t2 / over
+    t0 = 1 - t1 - t2
+    swap = (n % 2 == 1)[:, None]  # even sectors: apply Vn+1 first
+    va, vb = VECTOR_CODES[n], VECTOR_CODES[(n + 1) % 6]
+    first, second = np.where(swap, vb, va), np.where(swap, va, vb)
+    tf, tsec = np.where(swap[:, 0], t2, t1), np.where(swap[:, 0], t1, t2)
+    cum = np.cumsum(np.stack([t0 / 4, tf / 2, tsec / 2, t0 / 2, tsec / 2, tf / 2, t0 / 4], axis=1), axis=1)
+    seg = np.minimum((x[:, None] >= cum[k]).sum(1), 6)
+    zero, one = np.zeros((mf, 3), int), np.ones((mf, 3), int)
+    states = np.stack([zero, first, second, one, second, first, zero], axis=1)  # (mf, 7, 3)
+    per = {"phi": phi, "sector": n + 1, "alpha": alpha, "t1": t1, "t2": t2, "t0": t0, "states": states, "cum": cum}
+    return {"gates": states[k, seg].T.astype(float), "sector": (n + 1)[k], "t1": t1[k], "t2": t2[k], "t0": t0[k],
+            "period": per}

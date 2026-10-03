@@ -13,6 +13,9 @@ st.info("Switches are ideal and the DC bus is stiff. This is not a circuit simul
 st.page_link("pages/1_Half_Bridge.py", label="Half bridge", icon="1\ufe0f\u20e3")
 st.page_link("pages/2_Full_Bridge.py", label="Full bridge: bipolar vs unipolar", icon="2\ufe0f\u20e3")
 st.page_link("pages/3_Three_Phase.py", label="Three-phase inverter: SPWM, THI, SVPWM, DPWM", icon="3\ufe0f\u20e3")
+st.page_link("pages/4_Modulation_Comparison.py", label="Modulation comparison", icon="4\ufe0f\u20e3")
+st.page_link("pages/5_Sweeps.py", label="Sweeps: f_sw and m_a", icon="5\ufe0f\u20e3")
+st.page_link("pages/6_SVPWM.py", label="Space-vector PWM, step by step", icon="6\ufe0f\u20e3")
 
 st.subheader("How it computes")
 st.markdown(

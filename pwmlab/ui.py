@@ -6,20 +6,23 @@ from .plots import losses_plot
 from . import core, plots
 
 
-def sidebar_inputs(mf_default=15, ma_max=1.5):
+def sidebar_inputs(mf_default=15, ma_max=1.5, load_required=False, skip=()):
+    """Common sidebar. load_required: no checkbox, the R-L load is always on. skip: names ("ma", "mf") of
+    inputs to hide because the page sweeps them."""
     sb = st.sidebar
-    p = {
-        "carrier": sb.selectbox("Carrier", core.CARRIERS,
-                                help="Triangle: both edges move (double-edge). Sawtooth: one edge is fixed at the start of each carrier period, only the other moves (single-edge)."),
-        "ma": sb.slider("Modulation index  m\u2090", 0.0, ma_max, 0.8, 0.01,
-                        help="Reference amplitude / carrier amplitude. Above 1 the converter overmodulates (above 1.155 for SVPWM/THI three-phase)."),
-        "mf": sb.slider("Frequency ratio  m_f = f_sw / f\u2081", 3, 99, mf_default, 2,
-                        help="Integer ratio: the pattern repeats every fundamental period, so the spectrum is exact. Odd values keep half-wave symmetry."),
-        "vdc": sb.number_input("DC bus  V_dc [V]", 10.0, 2000.0, 400.0, 10.0),
-        "f1": sb.number_input("Fundamental  f\u2081 [Hz]", 1.0, 1000.0, 50.0),
-        "load": None, "dead": 0,
-    }
-    if sb.checkbox("Series R-L load", help="Adds the steady-state load current. Needed for dead time and losses."):
+    p = {"carrier": sb.selectbox("Carrier", core.CARRIERS,
+                                 help="Triangle: both edges move (double-edge). Sawtooth: one edge is fixed at the start of each carrier period, only the other moves (single-edge)."),
+         "ma": 0.8, "mf": mf_default}
+    if "ma" not in skip:
+        p["ma"] = sb.slider("Modulation index  m\u2090", 0.0, ma_max, 0.8, 0.01,
+                            help="Reference amplitude / carrier amplitude. Above 1 the converter overmodulates (above 1.155 for SVPWM/THI three-phase).")
+    if "mf" not in skip:
+        p["mf"] = sb.slider("Frequency ratio  m_f = f_sw / f\u2081", 3, 99, mf_default, 2,
+                            help="Integer ratio: the pattern repeats every fundamental period, so the spectrum is exact. Odd values keep half-wave symmetry.")
+    p["vdc"] = sb.number_input("DC bus  V_dc [V]", 10.0, 2000.0, 400.0, 10.0)
+    p["f1"] = sb.number_input("Fundamental  f\u2081 [Hz]", 1.0, 1000.0, 50.0)
+    p["load"], p["dead"] = None, 0
+    if load_required or sb.checkbox("Series R-L load", help="Adds the steady-state load current. Needed for dead time and losses."):
         R = sb.number_input("R [\u03a9]", 0.01, 1000.0, 10.0)
         L = sb.number_input("L [mH]", 0.1, 1000.0, 20.0) / 1000
         p["load"] = core.Load(p["f1"], R, L)
@@ -30,7 +33,6 @@ def sidebar_inputs(mf_default=15, ma_max=1.5):
             us = 1e6 / (p["f1"] * core.N)
             sb.caption(f"Grid resolution {us:.2f} \u00b5s, effective dead time {p['dead'] * us:.2f} \u00b5s.")
     return p
-
 
 def add_load(p, i, label, rows, spectra):
     """Append the load current (None when the load is off) to the plot rows and spectrum choices."""
@@ -44,6 +46,15 @@ FIELDS = [("vce0", "Transistor V\u2080 [V]", 1, 0.1), ("rce", "Transistor r [m\u
           ("eon", "E_on [mJ]", 1e3, 0.1), ("eoff", "E_off [mJ]", 1e3, 0.1), ("err", "E_rr [mJ]", 1e3, 0.1),
           ("vref", "Test voltage [V]", 1, 10.0), ("iref", "Test current [A]", 1, 5.0)]
 
+def device_inputs():
+    """Device parameters (shared with the Losses tab through the widget keys)."""
+    dev = dict(core.DEVICE)
+    with st.expander("Device parameters (transistor + antiparallel diode)"):
+        cols = st.columns(3)
+        for k, (key, label, scale, step) in enumerate(FIELDS):
+            dev[key] = cols[k % 3].number_input(label, min_value=0.001, value=float(core.DEVICE[key] * scale),
+                                                step=float(step), key=f"dev_{key}") / scale
+    return dev
 
 def losses_tab(p, s, n_legs=1, n_phases=1):
     """Loss breakdown of one leg, scaled to n_legs; efficiency of the converter stage only."""

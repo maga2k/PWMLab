@@ -99,3 +99,45 @@ def vector_plot(a, b, a_avg, b_avg, ref=None, vdc=None, unit="V"):
     fig.update_yaxes(title_text=f"\u03b2 [{unit}]", scaleanchor="x", scaleratio=1)
     fig.update_layout(height=480, margin=dict(t=10, b=10, l=10, r=10), legend=dict(orientation="h"))
     return fig
+
+
+def metric_bars(names, values, ylabel):
+    fig = go.Figure(go.Bar(x=names, y=values))
+    fig.update_layout(height=360, yaxis_title=ylabel, margin=dict(t=10, b=10, l=10, r=10))
+    return fig
+
+
+def sweep_plot(x, curves, xlabel, ylabel):
+    fig = go.Figure()
+    for name, y in curves.items():
+        fig.add_scatter(x=x, y=y, mode="lines+markers", name=name)
+    fig.update_layout(height=340, xaxis_title=xlabel, yaxis_title=ylabel,
+                      margin=dict(t=10, b=10, l=10, r=10), legend=dict(orientation="h"))
+    return fig
+
+
+def svpwm_plane(per, k, ma):
+    """Hexagon, reference locus and the decomposition of the reference of carrier period k (units of V_dc)."""
+    R, ang = 2 / 3, np.arange(7) * np.pi / 3
+    fig = go.Figure()
+    fig.add_scatter(x=R * np.cos(ang), y=R * np.sin(ang), mode="lines", name="hexagon", line=dict(dash="dot"))
+    for a in ang[:6]:  # sector boundaries
+        fig.add_scatter(x=[0, R * np.cos(a)], y=[0, R * np.sin(a)], mode="lines",
+                        line=dict(color="gray", width=1), showlegend=False)
+    th = np.linspace(0, 2 * np.pi, 200)
+    fig.add_scatter(x=ma / 2 * np.cos(th), y=ma / 2 * np.sin(th), mode="lines", name="reference locus")
+    fig.add_scatter(x=1.12 * R * np.cos(ang[:6]), y=1.12 * R * np.sin(ang[:6]), mode="text",
+                    text=[f"V{j + 1}" for j in range(6)], showlegend=False)
+    n = per["sector"][k] - 1
+    a1, a2 = n * np.pi / 3, (n + 1) * np.pi / 3
+    p1 = R * per["t1"][k] * np.array([np.cos(a1), np.sin(a1)])
+    p2 = p1 + R * per["t2"][k] * np.array([np.cos(a2), np.sin(a2)])
+    fig.add_scatter(x=[0, p1[0]], y=[0, p1[1]], mode="lines+markers", name="T1 \u00b7 V_n")
+    fig.add_scatter(x=[p1[0], p2[0]], y=[p1[1], p2[1]], mode="lines+markers", name="T2 \u00b7 V_n+1")
+    phi = per["phi"][k]
+    fig.add_scatter(x=[0, ma / 2 * np.cos(phi)], y=[0, ma / 2 * np.sin(phi)], mode="lines+markers",
+                    name="V_ref", line=dict(width=4))
+    fig.update_xaxes(title_text="\u03b1 [V_dc]")
+    fig.update_yaxes(title_text="\u03b2 [V_dc]", scaleanchor="x", scaleratio=1)
+    fig.update_layout(height=520, margin=dict(t=10, b=10, l=10, r=10), legend=dict(orientation="h"))
+    return fig

@@ -247,3 +247,35 @@ def test_carrier_average_recovers_the_reference():
     h = c.half_bridge(T, 0.8, 21, 400.0)
     assert np.max(np.abs(c.carrier_average(h["v_a0"], 21) - h["ref"] * 200)) < 0.05 * 400
     assert np.allclose(c.carrier_average(np.ones(c.N), 21), 1)
+
+# ---------------------------------------------------------------- explicit SVPWM
+@pytest.mark.parametrize("ma, mf", [(0.8, 21), (1.0, 45), (1.1, 24), (0.3, 39)])
+def test_explicit_svpwm_equals_min_max_injection(ma, mf):
+    sv = c.svpwm_explicit(T, ma, mf)
+    ref = c.three_phase_refs((np.floor(T * mf) + 0.5) / mf, ma, "SVPWM")  # reference sampled per carrier period
+    assert np.array_equal(sv["gates"], c._cmd(ref, c.carrier(T, mf)))
+
+
+def test_explicit_svpwm_dwell_times_and_sectors():
+    for ma in (0.5, 1.0, 1.3):
+        per = c.svpwm_explicit(T, ma, 24)["period"]
+        assert np.allclose(per["t0"] + per["t1"] + per["t2"], 1) and np.all(per["t0"] >= -1e-12)
+    per = c.svpwm_explicit(T, 0.8, 24)["period"]
+    assert np.bincount(per["sector"], minlength=7)[1:].tolist() == [4] * 6
+    steps = set(np.diff(np.concatenate([per["sector"], per["sector"][:1]])))
+    assert steps == {0, 1, -5}  # stay, advance to the next sector, or wrap from 6 back to 1
+
+
+def test_explicit_svpwm_reaches_zero_t0_at_the_linear_limit():
+    per = c.svpwm_explicit(T, 2 / np.sqrt(3), 24)["period"]
+    assert -1e-12 <= per["t0"].min() < 0.01
+
+
+def test_explicit_svpwm_switches_one_leg_at_a_time():
+    st = c.svpwm_explicit(T, 0.8, 24)["period"]["states"]
+    assert np.abs(np.diff(st, axis=1)).sum(2).max() == 1
+
+
+def test_explicit_svpwm_fundamental():
+    g = c.svpwm_explicit(T, 0.8, 45)["gates"]
+    assert amp((g[0] - g[1]) * 400.0, 1) == pytest.approx(np.sqrt(3) / 2 * 0.8 * 400, rel=1e-2)
