@@ -26,6 +26,18 @@ def carrier(t, mf, kind="Triangle"):
         return 1 - 2 * x
     return 4 * np.abs(x - 0.5) - 1
 
+SAMPLING = ["Natural", "Symmetric", "Asymmetric"]
+
+
+def sample_times(t, mf, mode="Natural"):
+    """Instants at which the reference is read, for every time sample. Natural: continuously (analog
+    comparator). Symmetric regular sampling: once per carrier period, at the carrier peak. Asymmetric:
+    twice per period, at the peak and at the trough. The value is held until the next reading."""
+    if mode == "Symmetric":
+        return np.floor(t * mf) / mf
+    if mode == "Asymmetric":
+        return np.floor(2 * t * mf) / (2 * mf)
+    return t
 
 def sine(t, ma, phase=0.0):
     return ma * np.sin(2 * np.pi * t - phase)
@@ -87,15 +99,15 @@ def _result(extra, up, lo, P, I):
 
 
 #Topologies
-def half_bridge(t, ma, mf, vdc, load=None, dead=0, kind="Triangle"):
-    ref, car = sine(t, ma), carrier(t, mf, kind)
+def half_bridge(t, ma, mf, vdc, load=None, dead=0, kind="Triangle", sampling="Natural"):
+    ref, car = sine(sample_times(t, mf, sampling), ma), carrier(t, mf, kind)
     cur = (lambda P: np.array([load_current(P[0], *load)])) if load else None
     up, lo, P, I = _legs(_cmd(ref, car)[None], dead, vdc, cur)
     return _result({"ref": ref, "car": car, "v_a0": P[0]}, up, lo, P, I)
 
 
-def full_bridge(t, ma, mf, vdc, strategy="Unipolar", load=None, dead=0, kind="Triangle"):
-    ref, car = sine(t, ma), carrier(t, mf, kind)
+def full_bridge(t, ma, mf, vdc, strategy="Unipolar", load=None, dead=0, kind="Triangle", sampling="Natural"):
+    ref, car = sine(sample_times(t, mf, sampling), ma), carrier(t, mf, kind)
     cmd_a = _cmd(ref, car)
     if strategy == "Bipolar":  # leg B is the complement of leg A
         ref_b, cmd_b = None, 1 - cmd_a
@@ -118,22 +130,25 @@ MODULATIONS = ["SPWM", "Third-harmonic injection", "SVPWM", "DPWM0", "DPWM1", "D
 DPWM_SHIFT = {"DPWM0": -np.pi / 6, "DPWM1": 0.0, "DPWM2": np.pi / 6}
 
 
-def _dpwm(t, ma, mf, r, psi):
+def _dpwm(t, ma, mf, r, psi, hold=True):
     """Discontinuous PWM: the phase with the largest |reference| of the frame shifted by psi is clamped to
     its rail (60 degrees per half cycle) and the same offset is added to all three phases.
 
     As in a digital controller the choice of the clamped phase is made once per carrier period (at its
     centre) and held. The offset still follows the reference, so the clamped phase stays exactly on its
     rail. Without this the jump of the offset would fall in the middle of a carrier period and bias the
-    fundamental by several percent."""
-    ts = (np.floor(t * mf) + 0.5) / mf
+    fundamental by several percent.
+    
+    With regular sampling (hold=False) t is already a sampling instant and the decision is simply taken there."""
+
+    ts = (np.floor(t * mf) + 0.5) / mf if hold else t
     shifted = np.array([sine(ts, ma, psi + k * 2 * np.pi / 3) for k in range(3)])
     k = np.argmax(np.abs(shifted), axis=0)[None]
     rail = np.sign(np.take_along_axis(shifted, k, 0))[0]
     return r + (rail - np.take_along_axis(r, k, 0)[0])
 
 
-def three_phase_refs(t, ma, mod, mf=21):
+def three_phase_refs(t, ma, mod, mf=21, hold=True):
     r = np.array([sine(t, ma, k * 2 * np.pi / 3) for k in range(3)])
     if mod == "SPWM":
         return r
@@ -142,7 +157,7 @@ def three_phase_refs(t, ma, mod, mf=21):
     if mod == "SVPWM":
         return r - (r.max(0) + r.min(0)) / 2  # min-max (zero-sequence) injection
     if mod in DPWM_SHIFT:
-        return _dpwm(t, ma, mf, r, DPWM_SHIFT[mod])
+        return _dpwm(t, ma, mf, r, DPWM_SHIFT[mod], hold)
     if mod == "DPWM-MAX":
         return r + (1 - r.max(0))  # highest phase clamped to +1
     if mod == "DPWM-MIN":
@@ -152,8 +167,9 @@ def three_phase_refs(t, ma, mod, mf=21):
     raise ValueError(mod)
 
 
-def three_phase(t, ma, mf, vdc, mod="SPWM", load=None, dead=0, kind="Triangle"):
-    refs, car = three_phase_refs(t, ma, mod, mf), carrier(t, mf, kind)
+def three_phase(t, ma, mf, vdc, mod="SPWM", load=None, dead=0, kind="Triangle", sampling="Natural"):
+    refs = three_phase_refs(sample_times(t, mf, sampling), ma, mod, mf, hold=sampling == "Natural")
+    car = carrier(t, mf, kind)
 
     def cur(P):  # isolated neutral: each phase sees its pole minus the common-mode voltage
         return np.array([load_current(v, *load) for v in P - P.mean(0)])

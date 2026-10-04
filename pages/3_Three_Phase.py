@@ -14,7 +14,7 @@ if mod == "Six-step":
     st.sidebar.info("Six-step ignores m\u2090, m_f and the carrier.")
 p = ui.sidebar_inputs(ma_max=1.3)
 t = core.time_grid()
-s = core.three_phase(t, p["ma"], p["mf"], p["vdc"], mod, p["load"], p["dead"], p["carrier"])
+s = core.three_phase(t, p["ma"], p["mf"], p["vdc"], mod, p["load"], p["dead"], p["carrier"], p["sampling"])
 
 gate_traces = [(f"S_{k}{sign}", g[i]) for i, k in enumerate("ABC") for sign, g in (("+", s["gate_up"]), ("\u2212", s["gate_lo"]))]
 rows = [("References and carrier (p.u.)",
@@ -40,4 +40,5 @@ ui.show(t, rows, spectra, p, [
     "Clarke / Park tab: zero-sequence injection (THI, SVPWM, DPWM) is invisible in \u03b1\u03b2, so the averaged vector is the same circle for all of them; what changes is which vectors build it. Six-step sits on the hexagon vertices. In dq the fundamental is a DC value and the PWM harmonics become ripple.",
     "Losses tab: DPWM switches each leg for only 2/3 of the period, so switching losses drop compared with SPWM at the same f_sw.",
 ], extras={"Losses": lambda: ui.losses_tab(p, s, n_legs=3, n_phases=3),
-           "Clarke / Park": lambda: ui.clarke_park_tab(p, s)})
+           "Clarke / Park": lambda: ui.clarke_park_tab(p, s),
+           "Power": lambda: ui.power_tab(p, s, "v_abc", n_phases=3)})

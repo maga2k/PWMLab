@@ -3,7 +3,7 @@ import numpy as np
 import streamlit as st
 from .plots import losses_plot
 
-from . import core, plots
+from . import core, metrics, plots
 
 
 def sidebar_inputs(mf_default=15, ma_max=1.5, load_required=False, skip=()):
@@ -11,7 +11,9 @@ def sidebar_inputs(mf_default=15, ma_max=1.5, load_required=False, skip=()):
     inputs to hide because the page sweeps them."""
     sb = st.sidebar
     p = {"carrier": sb.selectbox("Carrier", core.CARRIERS,
-                                 help="Triangle: both edges move (double-edge). Sawtooth: one edge is fixed at the start of each carrier period, only the other moves (single-edge)."),
+                                help="Triangle: both edges move (double-edge). Sawtooth: one edge is fixed at the start of each carrier period, only the other moves (single-edge)."),
+         "sampling": sb.selectbox("Reference sampling", core.SAMPLING,
+                                  help="Natural: the reference is compared continuously (analog). Symmetric: read once per carrier period, at the carrier peak. Asymmetric: read twice per period, at peak and trough. Regular sampling delays the output by 1/2 (symmetric) or 1/4 (asymmetric) of a carrier period."),
          "ma": 0.8, "mf": mf_default}
     if "ma" not in skip:
         p["ma"] = sb.slider("Modulation index  m\u2090", 0.0, ma_max, 0.8, 0.01,
@@ -103,7 +105,33 @@ def clarke_park_tab(p, s):
     m3.metric("|dq| (mean)", f"{np.hypot(d.mean(), q.mean()):.2f} {unit}")
     st.caption("Amplitude-invariant Clarke. The d axis sits on the fundamental of phase A, so a balanced set "
                "gives constant d and q = 0; a lagging current has q < 0.")
-    
+
+
+def power_tab(p, s, v_key, n_phases=1):
+    """Output power quantities of the R-L load. v_key: load voltage in the result dict (n_phases rows)."""
+    if s["i_legs"] is None:
+        st.info("Enable the series R-L load in the sidebar: the power quantities need the load current.")
+        return
+    v, i = np.atleast_2d(s[v_key]), s["i_legs"][:n_phases]
+    q = metrics.power_quantities(v, i)
+    c = st.columns(4)
+    c[0].metric("Active power P", f"{q['p']:.1f} W")
+    c[1].metric("Reactive power Q\u2081", f"{q['q1']:.1f} var", help="Fundamental only; positive for an inductive load.")
+    c[2].metric("Apparent power S", f"{q['s']:.1f} VA", help="Sum over the phases of V_rms \u00b7 I_rms.")
+    c[3].metric("Distortion power D", f"{q['d']:.1f} VA", help="S\u00b2 = P\u00b2 + Q\u2081\u00b2 + D\u00b2")
+    c = st.columns(4)
+    c[0].metric("Power factor P/S", f"{q['pf']:.3f}")
+    c[1].metric("Displacement factor cos \u03c6\u2081", f"{q['dpf']:.3f}", help="Phase shift between the fundamentals of voltage and current.")
+    c[2].metric("Distortion factor S\u2081/S", f"{q['dist']:.3f}", help="Share of the apparent power carried by the fundamentals. PF is close to the product of the two factors.")
+    c[3].metric("Current distortion factor I\u2081/I_rms", f"{q['i_dist']:.4f}", help="Distortion of the load current alone.")
+    st.caption("At the inverter output the voltage is the PWM waveform, so S\u2081/S and the power factor are low even when "
+               "the current is clean: the harmonics of the voltage show up as distortion power D. The displacement factor "
+               "and the current distortion factor are what the load sees.")
+    left, right = st.columns(2)
+    left.plotly_chart(plots.metric_bars(["P", "Q\u2081", "D", "S"], [q["p"], q["q1"], q["d"], q["s"]], "W / var / VA"))
+    inst = np.sum(v * i, axis=0)
+    right.plotly_chart(plots.time_plot(core.time_grid() / p["f1"] * 1000,
+                                       [("Instantaneous power [W]", [("p(t)", inst), ("P (mean)", np.full_like(inst, q["p"]))])]))  
 
 def show(t, rows, spectra, p, notes, extras=None):
     """extras: {tab name: zero-argument callable that draws the tab}."""

@@ -10,8 +10,7 @@ strategy = st.sidebar.radio("Strategy", ["Unipolar", "Bipolar"],
                             help="Bipolar: leg B is the complement of leg A. Unipolar: leg B uses the inverted reference.")
 p = ui.sidebar_inputs()
 t = core.time_grid()
-s = core.full_bridge(t, p["ma"], p["mf"], p["vdc"], strategy, p["load"], p["dead"], p["carrier"])
-
+s = core.full_bridge(t, p["ma"], p["mf"], p["vdc"], strategy, p["load"], p["dead"], p["carrier"], p["sampling"])
 ref_traces = [("reference", s["ref"]), ("carrier", s["car"])]
 if s["ref_b"] is not None:
     ref_traces.insert(1, ("\u2212reference", s["ref_b"]))
@@ -31,4 +30,5 @@ ui.show(t, rows, spectra, p, [
     "With a load, unipolar has far less current ripple at the same switching frequency: the output effectively switches at 2f_sw with half the voltage step.",
     "Try m_f = 15 and compare both strategies on the spectrum of the load current.",
     "With dead time, the unipolar output is no longer a clean three-level waveform: look at v_AB around the current zero crossings.",
-], extras={"Losses": lambda: ui.losses_tab(p, s, n_legs=2)})
+], extras={"Losses": lambda: ui.losses_tab(p, s, n_legs=2),
+           "Power": lambda: ui.power_tab(p, s, "v_ab")})

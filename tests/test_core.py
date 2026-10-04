@@ -279,3 +279,43 @@ def test_explicit_svpwm_switches_one_leg_at_a_time():
 def test_explicit_svpwm_fundamental():
     g = c.svpwm_explicit(T, 0.8, 45)["gates"]
     assert amp((g[0] - g[1]) * 400.0, 1) == pytest.approx(np.sqrt(3) / 2 * 0.8 * 400, rel=1e-2)
+
+# ---------------------------------------------------------------- regular sampling
+def phasor(x):
+    return 2 * np.fft.rfft(x)[1] / len(x)
+
+
+@pytest.mark.parametrize("mode, delay", [("Symmetric", 0.5), ("Asymmetric", 0.25)])
+@pytest.mark.parametrize("mf", [9, 15, 39])
+def test_regular_sampling_delays_the_output_by_a_fraction_of_the_carrier_period(mode, delay, mf):
+    nat = phasor(c.half_bridge(T, 0.8, mf, V)["v_a0"])
+    smp = phasor(c.half_bridge(T, 0.8, mf, V, sampling=mode)["v_a0"])
+    assert -np.angle(smp / nat) / (2 * np.pi) * mf == pytest.approx(delay, abs=0.02)  # in carrier periods
+    hold = mf if mode == "Symmetric" else 2 * mf  # zero-order hold of the reference: sinc(f1 / f_update)
+    assert abs(smp / nat) == pytest.approx(np.sinc(1 / hold), abs=0.005)
+
+
+def test_symmetric_sampling_gives_pulses_symmetric_about_the_carrier_trough():
+    mf = 32  # N / mf is an integer, so one carrier period is a whole number of samples
+    L = c.N // mf
+    sym = c.half_bridge(T, 0.8, mf, V, sampling="Symmetric")["gate_up"][0][:L]
+    nat = c.half_bridge(T, 0.8, mf, V)["gate_up"][0][:L]
+    assert np.array_equal(sym, np.roll(sym[::-1], 1))
+    assert not np.array_equal(nat, np.roll(nat[::-1], 1))
+
+
+def test_symmetric_sampling_adds_baseband_distortion_that_asymmetric_removes():
+    def baseband(mode):
+        a = c.spectrum(c.three_phase(T, 0.8, 15, V, "SPWM", sampling=mode)["v_ab"])[1]
+        return np.sqrt(np.sum(a[2:8] ** 2)) / a[1]
+    assert baseband("Natural") < 0.002 and baseband("Asymmetric") < 0.002
+    assert baseband("Symmetric") > 0.005
+
+
+@pytest.mark.parametrize("mode", ["Symmetric", "Asymmetric"])
+@pytest.mark.parametrize("mod", ["DPWM0", "DPWM1", "DPWM2"])
+def test_sampled_dpwm_references_stay_inside_the_carrier(mode, mod):
+    ts = c.sample_times(T, 21, mode)
+    assert np.abs(c.three_phase_refs(ts, 1.15, mod, 21, hold=False)).max() <= 1 + 1e-9
+    v = c.three_phase(T, 1.1, 21, V, mod, sampling=mode)["v_ab"]
+    assert amp(v, 1) == pytest.approx(np.sqrt(3) / 2 * 1.1, rel=0.02)

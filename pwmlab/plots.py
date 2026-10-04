@@ -109,12 +109,13 @@ def metric_bars(names, values, ylabel):
 
 def sweep_plot(x, curves, xlabel, ylabel):
     fig = go.Figure()
-    for name, y in curves.items():
-        fig.add_scatter(x=x, y=y, mode="lines+markers", name=name)
-    fig.update_layout(height=340, xaxis_title=xlabel, yaxis_title=ylabel,
-                      margin=dict(t=10, b=10, l=10, r=10), legend=dict(orientation="h"))
+    dashes, symbols = ["solid", "dash", "dot", "dashdot"], ["circle", "diamond", "square", "x"]
+    for i, (name, y) in enumerate(curves.items()):  # dash and symbol keep overlapping curves distinguishable
+        fig.add_scatter(x=x, y=y, mode="lines+markers", name=name, line=dict(dash=dashes[i % 4]),
+                        marker=dict(symbol=symbols[i % 4]))
+    fig.update_layout(height=340, xaxis_title=xlabel, yaxis_title=ylabel, margin=dict(t=40, b=10, l=10, r=10),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
     return fig
-
 
 def svpwm_plane(per, k, ma):
     """Hexagon, reference locus and the decomposition of the reference of carrier period k (units of V_dc)."""
@@ -132,12 +133,14 @@ def svpwm_plane(per, k, ma):
     a1, a2 = n * np.pi / 3, (n + 1) * np.pi / 3
     p1 = R * per["t1"][k] * np.array([np.cos(a1), np.sin(a1)])
     p2 = p1 + R * per["t2"][k] * np.array([np.cos(a2), np.sin(a2)])
-    fig.add_scatter(x=[0, p1[0]], y=[0, p1[1]], mode="lines+markers", name="T1 \u00b7 V_n")
-    fig.add_scatter(x=[p1[0], p2[0]], y=[p1[1], p2[1]], mode="lines+markers", name="T2 \u00b7 V_n+1")
+    fig.add_scatter(x=[0, p1[0]], y=[0, p1[1]], mode="lines+markers", name="T1 \u00b7 V_n",
+                    line=dict(color="#e45756", width=4))
+    fig.add_scatter(x=[p1[0], p2[0]], y=[p1[1], p2[1]], mode="lines+markers", name="T2 \u00b7 V_n+1",
+                    line=dict(color="#54a24b", width=4))
     phi = per["phi"][k]
     fig.add_scatter(x=[0, ma / 2 * np.cos(phi)], y=[0, ma / 2 * np.sin(phi)], mode="lines+markers",
-                    name="V_ref", line=dict(width=4))
-    fig.update_xaxes(title_text="\u03b1 [V_dc]")
-    fig.update_yaxes(title_text="\u03b2 [V_dc]", scaleanchor="x", scaleratio=1)
-    fig.update_layout(height=520, margin=dict(t=10, b=10, l=10, r=10), legend=dict(orientation="h"))
+                    name="V_ref", line=dict(color="#1f77b4", width=3))
+    fig.update_xaxes(title_text="\u03b1 [V_dc]", range=[-0.85, 0.85], constrain="domain")
+    fig.update_yaxes(title_text="\u03b2 [V_dc]", range=[-0.8, 0.8], scaleanchor="x", scaleratio=1, constrain="domain")
+    fig.update_layout(height=560, margin=dict(t=10, b=10, l=10, r=10), legend=dict(orientation="h"))
     return fig

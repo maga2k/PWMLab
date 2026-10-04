@@ -13,7 +13,7 @@ p = ui.sidebar_inputs(mf_default=39, ma_max=1.3, load_required=True, skip=(swept
 mods = st.sidebar.multiselect("Modulations", core.MODULATIONS, default=["SPWM", "SVPWM", "DPWM1", "DPWM2"])
 n = st.sidebar.slider("Points", 4, 25, 10)
 if swept == "mf":
-    lo, hi = st.sidebar.slider("m_f range", 5, 399, (9, 99))
+    lo, hi = st.sidebar.slider("m_f range", 5, 399, (9, 399))     # default fino a 20 kHz
     values = sorted({int(2 * round((v - 1) / 2) + 1) for v in np.linspace(lo, hi, n)})  # odd integers
     x, xlabel = np.array(values) * p["f1"] / 1000, "Switching frequency [kHz]"
     fixed = {"ma": p["ma"]}
@@ -22,7 +22,7 @@ else:
     values = [float(v) for v in np.round(np.linspace(lo, hi, n), 4)]
     x, xlabel = np.array(values), "Modulation index m_a"
     fixed = {"mf": p["mf"]}
-fixed.update(vdc=p["vdc"], load=p["load"], dead=p["dead"], kind=p["carrier"])
+fixed.update(vdc=p["vdc"], load=p["load"], dead=p["dead"], kind=p["carrier"], sampling=p["sampling"])
 dev = ui.device_inputs()
 
 
