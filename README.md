@@ -10,7 +10,7 @@ It is not a circuit simulator: switches are ideal, the DC bus is stiff and the l
 series R-L. The goal is to see how a modulation scheme behaves and why, not to replace a
 detailed simulation.
 
-**Try it online:** https://…streamlit.app
+**Try it online:** **Try it online:** https://pwmlab.streamlit.app
 
 ## Screenshots
 
