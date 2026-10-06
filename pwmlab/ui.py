@@ -7,14 +7,15 @@ from . import core, metrics, plots
 
 
 def sidebar_inputs(mf_default=15, ma_max=1.5, load_required=False, skip=()):
-    """Common sidebar. load_required: no checkbox, the R-L load is always on. skip: names ("ma", "mf") of
+    """Common sidebar. load_required: no checkbox, the R-L load is always on. skip: names ("ma", "mf", "carrier") of
     inputs to hide because the page sweeps them."""
     sb = st.sidebar
-    p = {"carrier": sb.selectbox("Carrier", core.CARRIERS,
-                                help="Triangle: both edges move (double-edge). Sawtooth: one edge is fixed at the start of each carrier period, only the other moves (single-edge)."),
-         "sampling": sb.selectbox("Reference sampling", core.SAMPLING,
-                                  help="Natural: the reference is compared continuously (analog). Symmetric: read once per carrier period, at the carrier peak. Asymmetric: read twice per period, at peak and trough. Regular sampling delays the output by 1/2 (symmetric) or 1/4 (asymmetric) of a carrier period."),
-         "ma": 0.8, "mf": mf_default}
+    p = {"carrier": "Triangle", "ma": 0.8, "mf": mf_default}
+    if "carrier" not in skip:
+        p["carrier"] = sb.selectbox("Carrier", core.CARRIERS,
+                                    help="Triangle: both edges move (double-edge). Sawtooth: one edge is fixed at the start of each carrier period, only the other moves (single-edge).")
+    p["sampling"] = sb.selectbox("Reference sampling", core.SAMPLING,
+                                 help="Natural: the reference is compared continuously (analog). Symmetric: read once per carrier period, at the carrier peak. Asymmetric: read twice per period, at peak and trough. Regular sampling delays the output by 1/2 (symmetric) or 1/4 (asymmetric) of a carrier period.")
     if "ma" not in skip:
         p["ma"] = sb.slider("Modulation index  m\u2090", 0.0, ma_max, 0.8, 0.01,
                             help="Reference amplitude / carrier amplitude. Above 1 the converter overmodulates (above 1.155 for SVPWM/THI three-phase).")
@@ -158,3 +159,72 @@ def show(t, rows, spectra, p, notes, extras=None):
     with st.expander("What to look for"):
         for n in notes:
             st.markdown(f"- {n}")
+    page_link("pages/7_Theory.py", "Theory: formulas and schematics", "\U0001F4D6")
+
+
+def show_svg(svg):
+    """Draw an inline SVG. It is wrapped in a div so that markdown leaves the content alone; the strokes use
+    currentColor, so the drawing follows the theme."""
+    st.markdown("<div>\n" + "\n".join(line.strip() for line in svg.splitlines() if line.strip()) + "\n</div>",
+                unsafe_allow_html=True)
+
+
+def page_link(path, label, icon=None):
+    """st.page_link that does not break a page when the target is missing (or not resolvable, as in tests)."""
+    try:
+        st.page_link(path, label=label, icon=icon)
+    except st.errors.StreamlitPageNotFoundError:
+        pass
+
+
+def device_values():
+    """Current device parameters without drawing any widget: what device_inputs() or the Losses tab set.
+    The Thermal tab sits next to the Losses tab, and two widgets cannot share a key on one page."""
+    return {key: float(st.session_state.get(f"dev_{key}", core.DEVICE[key] * scale)) / scale
+            for key, _, scale, _ in FIELDS}
+
+
+THERMAL_FIELDS = [("t_amb", "Ambient [\u00b0C]", 1, 5.0, -40.0), ("r_sa", "Heatsink R_th,sa [K/W]", 1, 0.05, 0.0),
+                  ("r_jc_t", "Transistor R_th,jc [K/W]", 1, 0.05, 0.01), ("r_jc_d", "Diode R_th,jc [K/W]", 1, 0.05, 0.01),
+                  ("tau", "Junction time constant [ms]", 1e3, 1.0, 1.0), ("tj_max", "T_j,max [\u00b0C]", 1, 5.0, 25.0)]
+
+
+def thermal_inputs():
+    """Thermal parameters, shared between pages through the widget keys."""
+    th = dict(core.THERMAL)
+    with st.expander("Thermal parameters"):
+        cols = st.columns(3)
+        for k, (key, label, scale, step, lo) in enumerate(THERMAL_FIELDS):
+            th[key] = cols[k % 3].number_input(label, min_value=float(lo), value=float(core.THERMAL[key] * scale),
+                                               step=float(step), key=f"th_{key}") / scale
+        st.caption("All devices share one heatsink (R_th,sa). Each junction adds its R_th,jc through a first-order "
+                   "thermal impedance with the time constant above.")
+    return th
+
+
+def thermal_tab(p, s, n_legs=1):
+    """Junction and heatsink temperatures from the device losses of one leg (the others are assumed identical)."""
+    if s["i_legs"] is None:
+        st.info("Enable the series R-L load in the sidebar: the thermal model needs the device losses.")
+        return
+    dev, th = device_values(), thermal_inputs()
+    power = core.leg_power_waveforms(s["poles"][0], s["i_legs"][0], p["f1"], p["vdc"], dev)
+    r = core.thermal_analysis(power, n_legs, p["f1"], th)
+    hot = max(r["devices"], key=lambda d: r["devices"][d]["tj_peak"])
+    peak = r["devices"][hot]["tj_peak"]
+    c = st.columns(4)
+    c[0].metric("Total switch losses", f"{r['p_total']:.1f} W")
+    c[1].metric("Heatsink temperature", f"{r['t_hs']:.1f} \u00b0C")
+    c[2].metric("Hottest junction (peak)", f"{peak:.1f} \u00b0C", help=f"Device {hot}")
+    c[3].metric("Margin to T_j,max", f"{th['tj_max'] - peak:.1f} K")
+    if peak > th["tj_max"]:
+        st.warning(f"The junction of {hot} exceeds T_j,max by {peak - th['tj_max']:.1f} K.")
+    st.dataframe([{"Device": d, "P avg [W]": round(v["p_avg"], 2), "Tj avg [\u00b0C]": round(v["tj_avg"], 1),
+                   "Tj peak [\u00b0C]": round(v["tj_peak"], 1), "\u0394Tj [K]": round(v["tj_swing"], 2)}
+                  for d, v in r["devices"].items()], hide_index=True)
+    st.plotly_chart(plots.time_plot(core.time_grid() / p["f1"] * 1000,
+                                    [("Junction temperature [\u00b0C]", [(d, v["tj"]) for d, v in r["devices"].items()])]))
+    st.caption("Device losses use the parameters set in the Losses tab. "
+               "The model resolves the temperature swing at the fundamental frequency, not the switching ripple. "
+               "A lower f\u2081 or a smaller time constant makes the swing larger, which is what limits the life of a "
+               "power module at low output frequency.")

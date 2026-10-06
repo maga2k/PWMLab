@@ -22,6 +22,10 @@ METRICS = {  # key: (label, unit)
     "dpf": ("Displacement factor cos(phi1)", "-"),
     "dist": ("Distortion factor S1/S", "-"),
     "i_dist": ("Current distortion factor I1/I_rms", "-"),
+    "h_dom": ("Dominant harmonic", "x f_sw"),
+    "t_hs": ("Heatsink temperature", "\u00b0C"),
+    "tj_peak": ("Hottest junction, peak", "\u00b0C"),
+    "tj_swing": ("Junction swing, hottest device", "K"),
     "vcm_rms": ("Common-mode voltage, RMS", "V"),
     "vcm_pk": ("Common-mode voltage, peak", "V"),
 }
@@ -63,7 +67,7 @@ def power_quantities(v, i):
             "i_dist": float(np.sqrt(0.5 * np.sum(np.abs(i1) ** 2) / i_sq)) if i_sq > 0 else nan}
 
 
-def summarize(s, load, vdc, dev=core.DEVICE, v_key="v_ab", n_legs=3, n_phases=3, vload_key="v_abc"):
+def summarize(s, load, vdc, dev=core.DEVICE, v_key="v_ab", n_legs=3, n_phases=3, vload_key="v_abc", thermal=None):
     """Metrics of a simulation result `s` (from core.three_phase & co) that includes the R-L load."""
     h, a = core.spectrum(s[v_key])
     thd, wthd = core.distortion(h, a)
@@ -80,16 +84,61 @@ def summarize(s, load, vdc, dev=core.DEVICE, v_key="v_ab", n_legs=3, n_phases=3,
                i_dist=pq["i_dist"])
     if "v_cm" in s:
         out["vcm_rms"], out["vcm_pk"] = rms(s["v_cm"]), float(np.abs(s["v_cm"]).max())
+    if thermal is not None:
+        th = core.thermal_analysis(core.leg_power_waveforms(s["poles"][0], i, load.f1, vdc, dev), n_legs, load.f1, thermal)
+        hot = max(th["devices"].values(), key=lambda d: d["tj_peak"])
+        out.update(t_hs=th["t_hs"], tj_peak=hot["tj_peak"], tj_swing=hot["tj_swing"])
     return out
 
 
-def three_phase_metrics(mod, ma, mf, vdc, load, dead=0, kind="Triangle", dev=core.DEVICE, sampling="Natural"):
+def three_phase_metrics(mod, ma, mf, vdc, load, dead=0, kind="Triangle", dev=core.DEVICE, sampling="Natural",
+                        thermal=None):
     s = core.three_phase(core.time_grid(), ma, mf, vdc, mod, load, dead, kind, sampling)
-    m = summarize(s, load, vdc, dev)
+    m = summarize(s, load, vdc, dev, thermal=thermal)
     m["m_eff"] = m["v1"] / (np.sqrt(3) / 2 * vdc)  # 1 = the line-to-line amplitude SPWM gives at m_a = 1
     return m
 
 def sweep(name, values, **fixed):
     """Run three_phase_metrics for every value of the keyword `name`. Returns {metric: array}."""
     rows = [three_phase_metrics(**{**fixed, name: v}) for v in values]
+    return {k: np.array([r[k] for r in rows]) for k in rows[0]}
+
+# ---------------------------------------------------------------- single-phase cases
+SINGLE_PHASE_CASES = ([f"Half bridge \u00b7 {k}" for k in core.CARRIERS] +
+                      [f"Full bridge \u00b7 {s} \u00b7 {k}" for s in ("Bipolar", "Unipolar") for k in core.CARRIERS])
+
+
+def parse_case(case):
+    """'Full bridge \u00b7 Unipolar \u00b7 Triangle' -> ('Full bridge', 'Unipolar', 'Triangle')."""
+    parts = case.split(" \u00b7 ")
+    return parts[0], (parts[1] if parts[0] == "Full bridge" else None), parts[-1]
+
+
+def single_phase_metrics(case, ma, mf, vdc, load, dead=0, dev=core.DEVICE, sampling="Natural", thermal=None):
+    """Metrics of a half-bridge or full-bridge case; the carrier (and for the full bridge the strategy) is
+    part of the case. m_eff is the fundamental over V_dc/2 (half bridge) or V_dc (full bridge)."""
+    topology, strategy, kind = parse_case(case)
+    t = core.time_grid()
+    if topology == "Half bridge":
+        s, v_key, n_legs, scale = core.half_bridge(t, ma, mf, vdc, load, dead, kind, sampling), "v_a0", 1, vdc / 2
+    else:
+        s, v_key, n_legs, scale = core.full_bridge(t, ma, mf, vdc, strategy, load, dead, kind, sampling), "v_ab", 2, vdc
+    out = summarize(s, load, vdc, dev, v_key=v_key, n_legs=n_legs, n_phases=1, vload_key=v_key, thermal=thermal)
+    h, a = core.spectrum(s[v_key])
+    out["m_eff"] = out["v1"] / scale
+    out["h_dom"] = float(h[2:][np.argmax(a[2:])]) / mf  # order of the strongest harmonic, in carrier frequencies
+    return out
+
+
+def case_metrics(topology, case, ma, mf, vdc, load, dead=0, kind="Triangle", dev=core.DEVICE, sampling="Natural",
+                 thermal=None):
+    """One entry point for both families. topology: 'Three-phase' (case = modulation) or 'Single-phase'."""
+    if topology == "Three-phase":
+        return three_phase_metrics(case, ma, mf, vdc, load, dead, kind, dev, sampling, thermal)
+    return single_phase_metrics(case, ma, mf, vdc, load, dead, dev, sampling, thermal)
+
+
+def case_sweep(topology, case, name, values, **fixed):
+    """case_metrics for every value of the keyword `name` (ma or mf); `fixed` holds the other keywords."""
+    rows = [case_metrics(topology, case, **{**fixed, name: v}) for v in values]
     return {k: np.array([r[k] for r in rows]) for k in rows[0]}

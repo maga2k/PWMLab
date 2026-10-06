@@ -1,7 +1,8 @@
 """Regenerate the README screenshots from the running app.
 
 One-time setup:   pip install playwright pillow && playwright install chromium
-Run from the repo root:   python scripts/make_screenshots.py
+Run from the repo root:   python scripts/make_screenshots.py [name ...]
+With names, only the screenshots whose name contains one of them are taken (e.g. "theory").
 """
 import subprocess
 import sys
@@ -28,6 +29,11 @@ def select(page, label, option):
 def toggle_load(page):
     page.get_by_test_id("stCheckbox").get_by_text("Series R-L load").click()
     page.wait_for_timeout(1500)
+
+
+def choose(page, text):
+    page.get_by_test_id("stRadio").get_by_text(text, exact=True).first.click()
+    page.wait_for_timeout(2500)
 
 
 def tab(page, name):
@@ -63,6 +69,12 @@ SHOTS = [
     ("modulation_comparison", "/Modulation_Comparison", 1750, lambda p: None, 1700),
     ("sweeps", "/Sweeps", 1500, lambda p: None, 1700),
     ("svpwm", "/SVPWM", 1300, lambda p: slider_steps(p, "Carrier period to inspect", "ArrowRight", 8)),
+    ("single_phase_comparison", "/Modulation_Comparison", 1900, lambda p: choose(p, "Single-phase"), 1700),
+    ("thermal", "/Three_Phase", 1500,
+     lambda p: (toggle_load(p), select(p, "Modulation", "DPWM2"), tab(p, "Thermal"))),
+    ("theory_pwm", "/Theory", 4200, lambda p: None),
+    ("theory_vectors", "/Theory", 5200, lambda p: tab(p, "Three-phase and space vectors")),
+    ("theory_losses", "/Theory", 4600, lambda p: tab(p, "Load, losses and thermal")),
 ]
 
 
@@ -80,7 +92,10 @@ def main():
                 time.sleep(1)
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
+            only = sys.argv[1:]
             for name, path, height, actions, *width in SHOTS:
+                if only and not any(o in name for o in only):
+                    continue
                 page = browser.new_page(viewport={"width": width[0] if width else WIDTH, "height": height},
                                         color_scheme="light")
                 page.goto(BASE + path)

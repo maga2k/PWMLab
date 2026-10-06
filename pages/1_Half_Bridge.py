@@ -26,4 +26,5 @@ ui.show(t, rows, spectra, p, [
     "Add dead time: both gates are low for a moment after each command edge, and the pole voltage in the gap follows the sign of the current.",
     "Dead time lowers the fundamental, more so at high f_sw and when the current is in phase with the voltage. THD and low-order harmonics grow.",
 ], extras={"Losses": lambda: ui.losses_tab(p, s),
-           "Power": lambda: ui.power_tab(p, s, "v_a0")})
+           "Power": lambda: ui.power_tab(p, s, "v_a0"),
+           "Thermal": lambda: ui.thermal_tab(p, s, n_legs=1)})

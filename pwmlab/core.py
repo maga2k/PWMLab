@@ -291,3 +291,51 @@ def svpwm_explicit(t, ma, mf):
     per = {"phi": phi, "sector": n + 1, "alpha": alpha, "t1": t1, "t2": t2, "t0": t0, "states": states, "cum": cum}
     return {"gates": states[k, seg].T.astype(float), "sector": (n + 1)[k], "t1": t1[k], "t2": t2[k], "t0": t0[k],
             "period": per}
+
+#Thermal model
+THERMAL = dict(t_amb=40.0, r_sa=0.5, r_jc_t=0.9, r_jc_d=1.3, tau=0.01, tj_max=150.0)
+
+
+def leg_power_waveforms(pole_v, i_out, f1, vdc, dev=DEVICE):
+    """Instantaneous power [W] in each device of one leg over the fundamental period: {device: array}.
+
+    Same model as leg_losses, so the means agree. A switching event is an impulse one sample long: its
+    energy E becomes E * f1 * n watts for 1 / (f1 * n) seconds."""
+    n = len(pole_v)
+    high, pos, ai = pole_v > 0, i_out > 0, np.abs(i_out)
+    pT, pD = dev["vce0"] * ai + dev["rce"] * ai**2, dev["vf0"] * ai + dev["rd"] * ai**2
+    nxt = np.roll(high, -1)
+    rise, fall = ~high & nxt, high & ~nxt
+    k = ai * vdc / (dev["vref"] * dev["iref"]) * f1 * n
+
+    def ev(*terms):
+        return sum(np.where(m, e * k, 0.0) for m, e in terms)
+
+    return {"T_up": np.where(high & pos, pT, 0.0) + ev((rise & pos, dev["eon"]), (fall & pos, dev["eoff"])),
+            "D_up": np.where(high & ~pos, pD, 0.0) + ev((fall & ~pos, dev["err"])),
+            "T_lo": np.where(~high & ~pos, pT, 0.0) + ev((fall & ~pos, dev["eon"]), (rise & ~pos, dev["eoff"])),
+            "D_lo": np.where(~high & pos, pD, 0.0) + ev((rise & pos, dev["err"]))}
+
+
+def junction_temperature(p_t, rth, tau, t_ref, f1):
+    """Periodic steady-state temperature of a junction fed by the power waveform p_t (one fundamental period)
+    through a first-order thermal impedance Zth = rth / (1 + s tau) above the reference temperature t_ref.
+    Solved harmonic by harmonic, like the load current."""
+    spec = np.fft.rfft(p_t)
+    z = rth / (1 + 1j * 2 * np.pi * f1 * np.arange(len(spec)) * tau)
+    return t_ref + np.fft.irfft(spec * z, n=len(p_t))
+
+
+def thermal_analysis(power, n_legs, f1, th=THERMAL):
+    """power: {device: power waveform of one leg}. All legs share one heatsink, whose temperature follows the
+    mean total loss (its time constant is far longer than a fundamental period). Each junction adds its own
+    R_jc and a thermal time constant tau, which sets how much of the fundamental-frequency swing survives.
+    The model resolves that swing, not the switching-frequency ripple."""
+    p_total = n_legs * sum(float(np.mean(p)) for p in power.values())
+    t_hs = th["t_amb"] + th["r_sa"] * p_total
+    devices = {}
+    for name, p in power.items():
+        tj = junction_temperature(p, th["r_jc_t"] if name.startswith("T") else th["r_jc_d"], th["tau"], t_hs, f1)
+        devices[name] = {"p_avg": float(np.mean(p)), "tj": tj, "tj_avg": float(np.mean(tj)),
+                         "tj_peak": float(tj.max()), "tj_swing": float(tj.max() - tj.min())}
+    return {"t_hs": t_hs, "p_total": p_total, "devices": devices}

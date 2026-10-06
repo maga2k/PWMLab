@@ -41,4 +41,5 @@ ui.show(t, rows, spectra, p, [
     "Losses tab: DPWM switches each leg for only 2/3 of the period, so switching losses drop compared with SPWM at the same f_sw.",
 ], extras={"Losses": lambda: ui.losses_tab(p, s, n_legs=3, n_phases=3),
            "Clarke / Park": lambda: ui.clarke_park_tab(p, s),
-           "Power": lambda: ui.power_tab(p, s, "v_abc", n_phases=3)})
+           "Power": lambda: ui.power_tab(p, s, "v_abc", n_phases=3),
+           "Thermal": lambda: ui.thermal_tab(p, s, n_legs=3)})

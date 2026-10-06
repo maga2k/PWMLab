@@ -319,3 +319,31 @@ def test_sampled_dpwm_references_stay_inside_the_carrier(mode, mod):
     assert np.abs(c.three_phase_refs(ts, 1.15, mod, 21, hold=False)).max() <= 1 + 1e-9
     v = c.three_phase(T, 1.1, 21, V, mod, sampling=mode)["v_ab"]
     assert amp(v, 1) == pytest.approx(np.sqrt(3) / 2 * 1.1, rel=0.02)
+
+    # ---------------------------------------------------------------- thermal model
+def test_power_waveforms_average_to_the_leg_losses():
+    s = c.three_phase(T, 0.8, 39, 400.0, "SPWM", c.Load(50, 10.0, 0.02), c.dead_samples(3, 50))
+    pw = c.leg_power_waveforms(s["poles"][0], s["i_legs"][0], 50, 400.0)
+    ll = c.leg_losses(s["poles"][0], s["i_legs"][0], 50, 400.0)
+    for d in pw:
+        assert np.mean(pw[d]) == pytest.approx(sum(ll[d]), rel=1e-9)
+
+
+def test_junction_temperature_dc_gain_and_sine_swing():
+    p = np.full(c.N, 20.0)
+    assert np.allclose(c.junction_temperature(p, 0.9, 0.01, 60.0, 50), 60.0 + 0.9 * 20.0)
+    for f1 in (5, 50, 400):  # a sinusoidal power sees |Zth| = rth / sqrt(1 + (w tau)^2)
+        tj = c.junction_temperature(50 + 40 * np.sin(2 * np.pi * T), 0.9, 0.01, 60.0, f1)
+        assert tj.max() - tj.min() == pytest.approx(2 * 40 * 0.9 / np.sqrt(1 + (2 * np.pi * f1 * 0.01) ** 2), rel=1e-6)
+
+
+def test_thermal_analysis_heatsink_and_average_junction():
+    s = c.three_phase(T, 0.8, 39, 400.0, "SPWM", c.Load(50, 10.0, 0.02))
+    pw = c.leg_power_waveforms(s["poles"][0], s["i_legs"][0], 50, 400.0)
+    th = dict(c.THERMAL, t_amb=25.0, r_sa=0.3)
+    r = c.thermal_analysis(pw, 3, 50, th)
+    assert r["t_hs"] == pytest.approx(25.0 + 0.3 * r["p_total"])
+    for name, d in r["devices"].items():
+        rjc = th["r_jc_t"] if name.startswith("T") else th["r_jc_d"]
+        assert d["tj_avg"] == pytest.approx(r["t_hs"] + rjc * d["p_avg"], rel=1e-9)
+        assert d["tj_peak"] >= d["tj_avg"] >= d["tj_peak"] - d["tj_swing"]

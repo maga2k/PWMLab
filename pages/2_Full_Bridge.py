@@ -31,4 +31,5 @@ ui.show(t, rows, spectra, p, [
     "Try m_f = 15 and compare both strategies on the spectrum of the load current.",
     "With dead time, the unipolar output is no longer a clean three-level waveform: look at v_AB around the current zero crossings.",
 ], extras={"Losses": lambda: ui.losses_tab(p, s, n_legs=2),
-           "Power": lambda: ui.power_tab(p, s, "v_ab")})
+           "Power": lambda: ui.power_tab(p, s, "v_ab"),
+           "Thermal": lambda: ui.thermal_tab(p, s, n_legs=2)})
